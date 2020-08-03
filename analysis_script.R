@@ -4,6 +4,10 @@ library(lme4)
 library(lmerTest)
 library(fitdistrplus)
 library(naniar)
+library(ggeffects)
+library(parameters)
+library(effectsize)
+library(performance)
 
 # DATA WRANGLING ####
 
@@ -125,7 +129,7 @@ df <- inner_join(df, stats_summary, by = "graph_image")
 df <- df %>% 
   mutate(slider_1.estimate = (lower_lim + (slider_1.response * (upper_lim - lower_lim))),
          slider_2.estimate = (lower_lim + (slider_2.response * (upper_lim - lower_lim))),
-         slider_3.estimate = (lower_lim + (slider_3.response * (upper_lim - lower_lim)))
+         slider_3.estimate = (lower_lim + (slider_3.response * (upper_lim - lower_lim))) 
          )
 
 # reading in graphs_book1, which provided the stats used to build the graphs
@@ -145,7 +149,9 @@ graphs_book1$y_label <- str_replace_all(graphs_book1$y_label, " ", "_")
 df <- graphs_book1 %>%
   select(y_label,
          graph_image,
-         ooo_pos
+         ooo_pos,
+         y_min,
+         y_max
          ) %>%
   inner_join(df, ., by = "graph_image")
 
@@ -154,18 +160,11 @@ df <- graphs_book1 %>%
 # 0 is perfect score
 # positive z_score = over-estimation
 # negative z_score = under-estimation
-df <- df %>% 
-  mutate(slider_1.z_estimate = ((slider_1.estimate)/slider_1.sd),
-         slider_2.z_estimate = ((slider_2.estimate)/slider_2.sd),
-         slider_3.z_estimate = ((slider_3.estimate)/slider_3.sd),
-         slider_1.z_mean = ((slider_1.mean)/slider_1.sd),
-         slider_2.z_mean = ((slider_2.mean)/slider_2.sd),
-         slider_3.z_mean = ((slider_3.mean)/slider_3.sd)
-  ) %>%
-  mutate(slider_1.z_score = (slider_1.z_estimate - slider_1.z_mean),
-         slider_2.z_score = (slider_2.z_estimate - slider_2.z_mean),
-         slider_3.z_score = (slider_3.z_estimate - slider_3.z_mean)
-         )
+df <- df %>%
+  mutate(slider_1.z_score = (slider_1.estimate - slider_1.mean)/slider_1.sd,
+         slider_2.z_score = (slider_2.estimate - slider_2.mean)/slider_2.sd,
+         slider_3.z_score = (slider_3.estimate - slider_3.mean)/slider_3.sd
+  ) 
 
 # First, I calculate the difference between the standard (same pop. mean)
 # and the odd-one-out (different pop. mean)
@@ -181,22 +180,22 @@ df <- df %>%
 df <- df %>% 
   rowwise() %>%
   mutate(difference = case_when(ooo_pos == 1 ~ 
-                                    mean(
-                                      (slider_1.z_mean - slider_2.z_mean),
-                                      (slider_1.z_mean - slider_3.z_mean)
-                                    ),
+                                 (slider_1.mean - 
+                                     mean(slider_2.mean, slider_3.mean)
+                                  )/
+                                   (y_max - y_min),
                                 ooo_pos == 2 ~ 
-                                    mean(
-                                      (slider_2.z_mean - slider_1.z_mean),
-                                      (slider_2.z_mean - slider_3.z_mean)
-                                    ),
+                                  (slider_1.mean - 
+                                     mean(slider_2.mean, slider_3.mean)
+                                  )/
+                                  (y_max - y_min),
                                 ooo_pos == 3 ~ 
-                                    mean(
-                                      (slider_3.z_mean - slider_1.z_mean),
-                                      (slider_3.z_mean - slider_2.z_mean)
-                                    )
-                                  )
-         ) %>%
+                                  (slider_1.mean - 
+                                     mean(slider_2.mean, slider_3.mean)
+                                  )/
+                                  (y_max - y_min)
+  )
+  ) %>%
   mutate(difference_sign = case_when(difference > 0 ~ "Positive",
                                      difference < 0 ~ "Negative")) %>% 
   mutate(difference = abs(difference))
@@ -216,7 +215,7 @@ df <- df %>%
   pivot_longer(cols = c(slider_1.response:slider_3.response,
                         slider_1.rt:slider_3.rt,
                         slider_1.mean:slider_3.estimate,
-                        slider_1.z_estimate:slider_3.z_score),
+                        slider_1.z_score:slider_3.z_score),
                names_to = c("slider", "measure"),
                names_pattern = "(.*)\\.(.*)") %>%
   pivot_wider(names_from = measure, values_from = value)
@@ -236,43 +235,110 @@ df <- df %>%
   mutate(is_ooo = case_when(ooo_pos == slider ~ TRUE,
                             ooo_pos != slider ~ FALSE))
 
+df <- df %>%
+  rowwise() %>%
+  mutate(height = ((mean - lower_lim)/(upper_lim - lower_lim)))
+
+df %>% ggplot(aes(x = z_score,
+                  y = (estimate-mean),
+                  colour = y_label)) +
+  geom_jitter(alpha= 0.1) +
+  facet_wrap(~ y_label, scales = "free_y")
+
+df %>% ggplot(aes(x = ,
+                  y = difference,
+                  colour = y_label)) +
+  geom_jitter(alpha= 0.1) +
+  facet_wrap(~ y_label, scales = "free_y")
+  
+
 # VISUALISATION ####
 
-# visualisation of all data: shows slight overestimation at a uniform rate
-df %>%
-  ggplot(aes(x = difference,
-             y = z_score)) +
-  geom_point(alpha = 0.05
-             ) +
-  geom_smooth()
-
 # visualising z_scores individually for each participant
+# participant 71 produced the unusually high estimates
 df %>% 
   ggplot(aes(x = participant,
              y = z_score)) +
   geom_point(alpha = 0.1) +
-  stat_summary(fun = mean, size = 0.1, color = "red")
+  stat_summary(fun = mean, size = 0.1, colour = "red")
 
-# coding 'is_ooo' as a factor
-df$is_ooo <- as.factor(df$is_ooo)
+# visualisation of mean z-score against difference 
+# for each slider on each trial
+# suggests over-estimation,generally, varying at different levels of difference
+df %>%
+  ggplot(aes(x = difference,
+             y = z_score)) +
+  #geom_smooth(method = lm) +
+  geom_smooth() +
+  stat_summary(fun = mean, size = 0.1, 
+               mapping = aes(colour = slider))
+
+# there doesn't seem to be an interaction between difference and is_ooo
+df %>% 
+  ggplot(aes(x = difference,
+             y = z_score,
+             colour = is_ooo)) +
+  geom_smooth(method = lm) +
+  stat_summary(fun = mean, size = 0.1)
+
+# there might be an interaction between difference and difference_sign
+# as difference increases, accuracy gets worse on graphs with negative ooo
+# and gets better on graphs with postive ooo
+df %>%
+  ggplot(aes(x = difference,
+             y = z_score,
+             colour = difference_sign)) +
+  geom_smooth(method = lm) +
+  stat_summary(fun = mean, size = 0.1)
 
 # plotting z_score separately for positive and negative difference
 # and separately for instances where
 # cluster is the standard (FALSE)
 # and cluster is the odd-one-out (TRUE)
+# looks like there might be a slight tendency 
+# to over-estimate the physically higher clusters
+# (the standard in negative cases and the odd-one-out in positive cases)
 df %>%
   ggplot(aes(x = difference_sign,
              y = z_score,
-             colour = is_ooo,
-            fill = is_ooo)) +
-  geom_violin() +
-  stat_summary(fun = mean, size = 0.5, color = "black", 
-               position = position_dodge(width = 0.9))
+             colour = is_ooo)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(-1.8, 1.8))
+
+# visualisation of mean z-score against z_mean (standardised actual height)
+# suggests that over-estimation increases when clusters are higher on the y axis
+df %>%
+  ggplot(aes(x = height,
+             y = z_score)) +
+  #geom_jitter(alpha = 0.1) +
+  geom_smooth(method = lm ) 
+  #geom_smooth() +
+  #stat_summary(fun = mean, size = 0.1)
+
+# but maybe this is only true for the standard, not the ooo
+df %>%
+  ggplot(aes(x = height,
+             y = z_score,
+             colour = is_ooo)) +
+  geom_smooth(method = lm)
+
+# suggests the increase in error as height increases is bigger
+# where there is a negative ooo than a positive ooo
+df %>%
+  ggplot(aes(x = height,
+             y = z_score,
+             colour = difference_sign)) +
+  geom_smooth(method = lm) +
+  stat_summary(fun = mean, size = 0.1)
 
 # ANALYSIS ####
 
 # checking for missing values
 vis_miss(df)
+
+# coding 'is_ooo' and 'difference_sign' as factors
+df$is_ooo <- as.factor(df$is_ooo)
+df$difference_sign <- as.factor(df$difference_sign)
 
 # checking the distribution of the DV (z_score)
 descdist(df$z_score)
@@ -282,59 +348,149 @@ hist(df$z_score)
 # summary stats
 mean(df$z_score)
 # on average, there is slight over-estimation
+sd(df$z_score)
+lCI <- mean(df$z_score) - ((sd(df$z_score))*1.96)
+uCI <- mean(df$z_score) + ((sd(df$z_score))*1.96)
+lCI
+uCI
+uCI - lCI
+# 95% of responses are within 3 cluster widths of the cluster centroid
+
+# Is there evidence for over-estimation changing as a function of y_ axis position?
+model1 <- lmer(z_score ~ height +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model1_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model1, model1_null)
+summary(model1)
+# yes
 
 # Does accuracy differ as a function of difference magnitude (and sign)?
-#
-# coding difference_sign as a factor
-df$difference_sign <- as.factor(df$difference_sign)
-#
-# random effects for participant and y_label
-# not adding random slopes for difference to random effects:
-# 1. results in singular fit error when added to participant
-# 2. would not expect any relationship between difference and y_label (block)
-# (distribution of difference magnitude is similar across blocks)
-#
-# not adding random slopes for difference_sign to random effect
-# 1. model doesn't converge when added to participant
-# 2. would not expect any relationship between difference_sign and y_label
-# (positive/negative difference numbers similar across blocks )
-model1 <- lmer(z_score ~ difference + difference_sign + 
-                 (1 | participant) + 
-                 (1 | y_label), 
-               data = df)
-model1
-# both fixed effects appear to make a significant contribution
-
-# but no significant difference in z_scores based on difference or difference sign
-# the intercept is significantly different from 0
-# This suggests over-estimation in general, but not as a function of difference
-summary(model1)
-
-
-# what do the summary stats look like when grouped by 'is_ooo'?
-df %>% 
-  group_by(is_ooo) %>%
-  summarise(mean = mean(z_score),
-            sd = sd(z_score))
-
-# Did accuracy differ for the standard vs the odd-one out?
-# 
-# coding 'is_ooo' as a factor
-df$is_ooo <- as.factor(df$is_ooo)
-#
-# as previously mentioned, 
-# there is no justification for added random slopes based on graph features
-# to the random effects term 'y_label' (block)
-#
-# adding any fixed effects term as a random slope on participants
-# results in singular fit or failure to converge
-model2 <- lmer(z_score ~ is_ooo + difference + difference_sign + 
+model2 <- lmer(z_score ~ difference:difference_sign +
                  (1 | participant) +
-                 (1 | y_label), 
+                 (1 | graph_image), 
                data = df)
-model2
-# all fixed effects are significant contributors
-summary(model2)
-# no fixed effects are significant predictors of z_score
+model2_null <- lmer(z_score ~ 
+                  (1 | participant) +
+                  (1 | graph_image), 
+                data = df)
+anova(model2, model2_null)
+# no evidence for full model
 
+# is there an interaction between difference_sign and is_ooo?
+model3 <- lmer(z_score ~ difference_sign*is_ooo +
+                 (1 | participant) +
+                 (1 | graph_image),
+               data = df)
+model3_null <- lmer(z_score ~ 
+                 (1 | participant) +
+                 (1 | graph_image),
+               data = df)
+anova(model3_null, model3)
+summary(model3)# no evidence for full model
+
+# is there an interaction between height and is_ooo?
+model4 <- lmer(z_score ~ height*is_ooo +
+                 (1 | participant) +
+                 (1 | graph_image),
+               data = df)
+model4_null <- lmer(z_score ~ 
+                      (1 | participant) +
+                      (1 | graph_image),
+                    data = df)
+anova(model4_null, model4)
+summary(model4)
+# yes
+
+# is there an interaction between height and difference sign?
+model5 <- lmer(z_score ~ height*difference_sign +
+                 (1 | participant) +
+                 (1 | graph_image),
+               data = df)
+model5_null <- lmer(z_score ~ 
+                      (1 | participant) +
+                      (1 | graph_image),
+                    data = df)
+anova(model5_null, model5)
+# no evidence for full model
+
+# including an interaction and two additive fixed effects
+model6 <- lmer(z_score ~ height*is_ooo + difference_sign + difference +
+                 (1 | participant) +
+                 (1 | graph_image),
+               data = df)
+model6_null <- lmer(z_score ~
+                      (1 | participant) +
+                      (1 | graph_image),
+                    data = df)
+anova(model6_null, model6)
+summary(model6)
+
+# removing the difference fixed effect 
+# in order to make way for random participant slopes
+model7 <- lmer(z_score ~ height*is_ooo + difference_sign +
+                 (1 + height | participant) +
+                 (1 | graph_image),
+               data = df)
+model7_null <- lmer(z_score ~ 
+                      (1 + height | participant) +
+                      (1 | graph_image),
+                    data = df)
+anova(model7_null, model7)
+summary(model7)
+anova(model7)
+
+check_model(model7)
+model_performance(model7)
+plot(compare_performance(model7, 
+                         model6, 
+                         model5, 
+                         model4, 
+                         model3, 
+                         model2, 
+                         model1,
+                         rank = TRUE))
+plot(compare_performance(model7, model7_null))
+plot(compare_performance(model7, model7_null, model4))
+model_parameters(model7)
+plot_model(model7,
+           show.values = TRUE,
+           value.offset = .4)
+plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
+standardize_parameters(model6)
+eta_squared(model6)
+anova(model7)
+F_to_eta2(
+  f = c(16.2328),
+  df = c(1),
+  df_error = c(4733)
+)
+
+# investigating effect of learning:
+df %>%
+  ggplot(aes(x = presentation,
+             y = z_score)) +
+  stat_summary(fun = mean, size = 0.1, 
+               mapping = aes(colour = slider)) +
+  geom_smooth()
+
+# no effect of learning
+model8 <- lmer(z_score ~ presentation + 
+                 (1 | participant) +
+                 (1 | graph_image), 
+               data = df)
+model8_null <- lmer(z_score ~ 
+                      (1 | participant) +
+                      (1 | graph_image),
+                    data = df)
+anova(model8_null, model8)
+
+
+
+# Overlapping/non-overlapping clusters?
+# Bayes?
 
