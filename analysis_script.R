@@ -185,13 +185,13 @@ df <- df %>%
                                   )/
                                    (y_max - y_min),
                                 ooo_pos == 2 ~ 
-                                  (slider_1.mean - 
-                                     mean(slider_2.mean, slider_3.mean)
+                                  (slider_2.mean - 
+                                     mean(slider_1.mean, slider_3.mean)
                                   )/
                                   (y_max - y_min),
                                 ooo_pos == 3 ~ 
-                                  (slider_1.mean - 
-                                     mean(slider_2.mean, slider_3.mean)
+                                  (slider_3.mean - 
+                                     mean(slider_1.mean, slider_2.mean)
                                   )/
                                   (y_max - y_min)
   )
@@ -245,14 +245,14 @@ df %>% ggplot(aes(x = z_score,
   geom_jitter(alpha= 0.1) +
   facet_wrap(~ y_label, scales = "free_y")
 
-df %>% ggplot(aes(x = ,
-                  y = difference,
+df %>% ggplot(aes(x = difference,
+                  y = z_score,
                   colour = y_label)) +
   geom_jitter(alpha= 0.1) +
   facet_wrap(~ y_label, scales = "free_y")
   
 
-# VISUALISATION ####
+# VISUALISATION AND ANALYSIS####
 
 # visualising z_scores individually for each participant
 # participant 71 produced the unusually high estimates
@@ -262,16 +262,47 @@ df %>%
   geom_point(alpha = 0.1) +
   stat_summary(fun = mean, size = 0.1, colour = "red")
 
+# is ooo or standard more accurate?
+df %>%
+  ggplot(aes(y = z_score,
+             x = difference_sign)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(-1.8, 1.8))
+
+model1 <- lmer(z_score ~ is_ooo +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model1_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model1, model1_null)
+summary(model1)
+# no difference between ooo and standard
+
 # visualisation of mean z-score against difference 
 # for each slider on each trial
 # suggests over-estimation,generally, varying at different levels of difference
 df %>%
   ggplot(aes(x = difference,
              y = z_score)) +
-  #geom_smooth(method = lm) +
-  geom_smooth() +
+  geom_smooth(method = lm) +
+  #geom_smooth() +
   stat_summary(fun = mean, size = 0.1, 
                mapping = aes(colour = slider))
+
+model2 <- lmer(z_score ~ difference +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model2_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model2, model2_null)
+summary(model2)
+# no effect of difference
 
 # there doesn't seem to be an interaction between difference and is_ooo
 df %>% 
@@ -281,15 +312,36 @@ df %>%
   geom_smooth(method = lm) +
   stat_summary(fun = mean, size = 0.1)
 
-# there might be an interaction between difference and difference_sign
-# as difference increases, accuracy gets worse on graphs with negative ooo
-# and gets better on graphs with postive ooo
+model3 <- lmer(z_score ~ difference*is_ooo +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model3_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model3, model3_null)
+summary(model3)
+# no main effects or interactions
+
+# is negative or positive difference sign more accurate?
 df %>%
-  ggplot(aes(x = difference,
-             y = z_score,
-             colour = difference_sign)) +
-  geom_smooth(method = lm) +
-  stat_summary(fun = mean, size = 0.1)
+  ggplot(aes(y = z_score,
+             x = difference_sign)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(-1.8, 1.8))
+
+model4 <- lmer(z_score ~ difference_sign +
+                 (1 + difference_sign | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model4_null <- lmer(z_score ~ 
+                      (1 + difference_sign | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model4, model4_null)
+summary(model4)
+# no effect for difference_sign
 
 # plotting z_score separately for positive and negative difference
 # and separately for instances where
@@ -303,7 +355,41 @@ df %>%
              y = z_score,
              colour = is_ooo)) +
   geom_boxplot(outlier.shape = NA) +
-  coord_cartesian(ylim = c(-1.8, 1.8))
+  coord_cartesian(ylim = c(-1.6, 1.6)) 
+
+model5 <- lmer(z_score ~ difference_sign*is_ooo +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model5_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model5, model5_null)
+summary(model5)
+# no interaction or main effects
+
+# there doesn't seem to be an interaction between difference and difference_sign
+df %>% 
+  ggplot(aes(x = difference,
+             y = z_score,
+             colour = difference_sign)) +
+  geom_smooth(method = lm) +
+  stat_summary(fun = mean, size = 0.1) +
+  facet_wrap(~ is_ooo)
+
+model6 <- lmer(z_score ~ difference*difference_sign +
+                 (1 + difference_sign | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model6_null <- lmer(z_score ~ 
+                      (1 + difference_sign | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model6, model6_null)
+summary(model6)
+# experimental model is not significant over null model, 
+# but interaction is significant within experimental model
 
 # visualisation of mean z-score against z_mean (standardised actual height)
 # suggests that over-estimation increases when clusters are higher on the y axis
@@ -311,16 +397,41 @@ df %>%
   ggplot(aes(x = height,
              y = z_score)) +
   #geom_jitter(alpha = 0.1) +
-  geom_smooth(method = lm ) 
+  geom_smooth(method = lm ) +
   #geom_smooth() +
-  #stat_summary(fun = mean, size = 0.1)
+  stat_summary(fun = mean, size = 0.1)
+
+model7 <- lmer(z_score ~ height +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model7_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model7, model7_null)
+summary(model7)
+# experimental model is not significant over null model, 
+# but interaction is significant within experimental model
 
 # but maybe this is only true for the standard, not the ooo
 df %>%
   ggplot(aes(x = height,
              y = z_score,
              colour = is_ooo)) +
-  geom_smooth(method = lm)
+  geom_smooth(method = lm) +
+  facet_wrap(~ difference_sign)
+
+model8 <- lmer(z_score ~ height*is_ooo +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model8_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model8, model8_null)
+summary(model8)
 
 # suggests the increase in error as height increases is bigger
 # where there is a negative ooo than a positive ooo
@@ -329,8 +440,56 @@ df %>%
              y = z_score,
              colour = difference_sign)) +
   geom_smooth(method = lm) +
-  stat_summary(fun = mean, size = 0.1)
+  stat_summary(fun = mean, size = 0.1) +
+  facet_wrap(~ is_ooo)
 
+model8 <- lmer(z_score ~ height*difference_sign +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model8_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model8, model8_null)
+summary(model8)
+
+model9a <- lmer(z_score ~ height*is_ooo + difference +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df,
+               REML = FALSE)
+model9b <- lmer(z_score ~ height*is_ooo + difference_sign +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df,
+               REML = FALSE)
+model9c <- lmer(z_score ~ height*is_ooo + difference*difference_sign +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df,
+               REML = FALSE)
+model9d <- lmer(z_score ~ height*is_ooo +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df,
+               REML = FALSE)
+model9_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df,
+                    REML = FALSE)
+# fitted all with REML = FALSE
+# this changes values on performance spider diagram
+# work out what is happening here
+plot(compare_performance(model9a, 
+                         model9b,
+                         model9c,
+                         model9d,
+                         model9_null,
+                         rank = TRUE))
+anova(model9d, model9_null)
+summary(model9d)
 # ANALYSIS ####
 
 # checking for missing values
@@ -369,8 +528,21 @@ anova(model1, model1_null)
 summary(model1)
 # yes
 
-# Does accuracy differ as a function of difference magnitude (and sign)?
-model2 <- lmer(z_score ~ difference:difference_sign +
+
+
+model1 <- lmer(z_score ~ difference_sign +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+model1_null <- lmer(z_score ~ 
+                      (1 | participant) + 
+                      (1 | graph_image), 
+                    data = df)
+anova(model1, model1_null)
+summary(model1)
+
+# Does accuracy differ as a function of difference magnitude and sign?
+model2 <- lmer(z_score ~ difference*is_ooo +
                  (1 | participant) +
                  (1 | graph_image), 
                data = df)
@@ -379,7 +551,8 @@ model2_null <- lmer(z_score ~
                   (1 | graph_image), 
                 data = df)
 anova(model2, model2_null)
-# no evidence for full model
+summary(model2)
+# evidence supporting full model
 
 # is there an interaction between difference_sign and is_ooo?
 model3 <- lmer(z_score ~ difference_sign*is_ooo +
@@ -416,7 +589,8 @@ model5_null <- lmer(z_score ~
                       (1 | graph_image),
                     data = df)
 anova(model5_null, model5)
-# no evidence for full model
+summary(model5)
+# evidence supporting full model
 
 # including an interaction and two additive fixed effects
 model6 <- lmer(z_score ~ height*is_ooo + difference_sign + difference +
@@ -433,11 +607,11 @@ summary(model6)
 # removing the difference fixed effect 
 # in order to make way for random participant slopes
 model7 <- lmer(z_score ~ height*is_ooo + difference_sign +
-                 (1 + height | participant) +
+                 (1 + difference_sign | participant) +
                  (1 | graph_image),
                data = df)
 model7_null <- lmer(z_score ~ 
-                      (1 + height | participant) +
+                      (1 + difference_sign | participant) +
                       (1 | graph_image),
                     data = df)
 anova(model7_null, model7)
