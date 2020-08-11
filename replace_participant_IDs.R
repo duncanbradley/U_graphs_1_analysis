@@ -1,7 +1,8 @@
 library(tidyverse)
 
+# PAVLOVIA DATA ####
 # paste the name of the folder that contains the data
-folder <- "Understanding_Graphs_1_41319_2020-06-25_10h50"
+folder <- "Understanding_Graphs_1_41319_2020-08-11_07h03"
 
 # locate the (only) csv file
 csv_file <- dir(folder, pattern = "*.csv") # get file names
@@ -35,10 +36,39 @@ all <- all %>%
 # write new csv
 write_csv(all, "U_graphs_1_data.csv")
 
-###################################
-# VISUALISE DATA TO CHECK RESPONSES
+# PROLIFIC DATA ####
+# paste the name of the folder that contains the data
+location <- dir("Downloads") # get file names
+
+# read the csv as 'all'
+prolific_data <- read_csv(file.path("prolific_export.csv")) 
+
+prolific_data <- prolific_data %>%
+  filter(status == "APPROVED") %>%
+  filter(entered_code != "NOCODE") %>%
+  mutate(time_taken = time_taken/60)
+
+mean(prolific_data$time_taken)
+
+# "I finished the experiment, 
+# reached the last page where I was told that all the data was fictional 
+# and pressed y to understand and then spacebar to finish but then got an error: 
+# ExPrag_UoM/understanding_graphs1; 
+# when saving data from a previously opened session on the server; 
+# the credit reserved for this session has been released: results cannot be saved.   
+# Unfortunately I have to go for an appointment and will be unable to 
+# try and repeat the experiment so I am submitting the results with NOCODE."
+
+# "Hello, finally I managed to the study and I finiseh all the graphs, 
+# but at the end, there appeard an info that I encountered the following error: 
+# when uploading participant's results for experiment: 
+# ExPrag_UoM/understanging_graphs_1 Has my submission been saved?"
+# recorded time = 9 mins
+# also has NOCODE as entered_code
+
+# VISUALISE DATA TO CHECK RESPONSES - FOR APPROVING SUBMISSIONS ####
 # graphs 53 and 58
-all %>% 
+all %>%
   select(slider_1.response, 
          slider_2.response, 
          slider_3.response, 
