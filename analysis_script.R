@@ -273,7 +273,8 @@ library(ggridges)
 df %>%
   ggplot(aes(x = height,
              y = is_ooo)) + 
-  geom_density_ridges(alpha = 0.5)
+  geom_density_ridges(alpha = 0.5) +
+  geom_boxplot()
   
 
 # VISUALISATION AND ANALYSIS####
@@ -306,6 +307,8 @@ abline(v=qts[2],col="red")
 abline(v=mean(df$z_score),col="blue")
 qts
 CI(df$z_score, ci=0.95)
+
+t.test(df$z_score)
 
 
 # visualising z_scores individually for each participant
@@ -465,7 +468,7 @@ model7_null <- lmer(z_score ~
                     data = df)
 anova(model7, model7_null)
 summary(model7)
-# experimental model is not significant over null model, 
+# experimental model is  significant over null model, 
 # but interaction is significant within experimental model
 
 # but maybe this is only true for the standard, not the ooo
@@ -489,18 +492,36 @@ model8_null <- lmer(z_score ~
 anova(model8, model8_null)
 summary(model8)
 
+
+library(interactions)
+library(jtools)
+summ(model8)
+interact_plot(model8, pred = height, modx = is_ooo, plot.points = FALSE) + theme_apa()
+ss <- sim_slopes(model8, pred = height, modx = is_ooo, johnson_neyman = FALSE)
+ss
+ss$slopes
+ss$ints
+
+library(ggstance)
+plot(ss)
+dd <- probe_interaction(model8, pred = height, modx = is_ooo, cond.int = TRUE,
+                  interval = TRUE,  jnplot = FALSE)
+dd
+dd$simslopes$slopes
+dd$simslopes$ints
+
 # suggests the increase in error as height increases is bigger
 # where there is a negative ooo than a positive ooo
 df %>%
   ggplot(aes(x = height,
              y = z_score,
              colour = difference_sign)) +
-  geom_smooth(method = lm) +
-  geom_point() +
-  stat_summary(fun = mean, size = 0.1) +
-  facet_wrap(~ is_ooo)
+  geom_smooth(method = lm)
+  #geom_point() +
+  #stat_summary(fun = mean, size = 0.1) +
+  #facet_wrap(~ is_ooo)
 
-model8 <- lmer(z_score ~ height*difference_sign +
+model8 <- lmer(z_score ~ height*is_ooo +
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
@@ -568,8 +589,8 @@ model8_null <- lmer(z_score ~
 anova(model8_null, model8)
 summary(model8)
 
-check_model(model7)
-model_performance(model7)
+check_model(model8)
+model_performance(model8)
 plot(compare_performance(model7, 
                          model6, 
                          model5, 
@@ -701,3 +722,5 @@ mean(df$Age)
 sd(df$Age)
 
 unique(participant)
+
+#Change difference_sign to ooo_pos (above/below)
