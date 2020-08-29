@@ -1,14 +1,12 @@
 library(tidyverse)
-library(zoo)
 library(lme4)
 library(lmerTest)
+library(zoo)
 library(fitdistrplus)
-library(naniar)
-library(ggeffects)
-library(parameters)
-library(effectsize)
 library(performance)
-library(janitor)
+library(naniar)
+library(broom.mixed)
+library(interactions)
 
 # DATA WRANGLING ####
 
@@ -18,26 +16,30 @@ rename <- dplyr::rename
 
 
 # read in csv
-df <- read_csv("U_graphs_1_data.csv",
-                     col_types = cols(slider_2.rt = col_number()))
+df <- read_csv("U_graphs_1_data.csv")
 
 # select required columns
 df <- df %>% select(participant,
-                         graph_image,
-                         slider_1.response,
-                         slider_2.response,
-                         slider_3.response,
-                         key_resp_done.rt,
-                         slider_1.rt,
-                         slider_2.rt,
-                         slider_3.rt,
-                         block_name.thisTrialN,
-                         choose_blocks.thisN,
-                         key_resp_debrief.keys,
-                         `Age *`,
-                         `Gender *`,
-                         `Highest level of education completed so far (e.g~ High school/grade (US); GCSE/Secondary School (UK); A-Levels; Bachelor's degree etc~) *`
+                    graph_image,
+                    slider_1.response,
+                    slider_2.response,
+                    slider_3.response,
+                    slider_1.rt, 
+                    slider_2.rt,
+                    slider_3.rt,
+                    block_name.thisTrialN,
+                    choose_blocks.thisN,
+                    key_resp_debrief.keys,
+                    `Age *`,
+                    `Gender *`,
+                    `Highest level of education completed so far (e.g~ High school/grade (US); GCSE/Secondary School (UK); A-Levels; Bachelor's degree etc~) *`
 )
+
+# in this dataframe, there are rows that contain no useful data
+# this is due to the recording of consent prior to beginning the experiment
+# and because `choose_blocks.thisN`, which shows the presentation ordering of blocks,
+# is only recorded at the end of each block
+# except for the final block, so `key_resp_debrief.rt` is used as a temporary placeholder
 
 # filter to remove cases where there is no entry in
 # graph_image OR choose_blocks.thisN OR key_resp_debrief.rt
@@ -63,24 +65,34 @@ df$choose_blocks.thisN <- na.locf(df$choose_blocks.thisN, fromLast = TRUE)
 # remove rows without an observation in graph_image as they are no longer needed
 df <- df %>% filter(!is.na(graph_image))
 
-# add a new column, presentation
-# this shows the presentation order across the whole experiment
+# add a new column, graph_order
+# this shows the presentation order of individual graphs across the whole experiment
 df <- df %>%
-  mutate(presentation = block_name.thisTrialN + (choose_blocks.thisN * 9))
+  mutate(graph_order = block_name.thisTrialN + (choose_blocks.thisN * 9))
 
 # add a new column, RT
 # this is the time from blank graph appearing to last slider response
+# last slider response is the maximum value (this accounts for revisiting sliders)
 # pmax is the parallel (rowwise) maximum
+# THEN 
+# remove individual reaction time columns
 df <- df %>%
-  mutate(total_RT = pmax(slider_1.rt, slider_2.rt, slider_3.rt))
+  mutate(total_RT = pmax(slider_1.rt, slider_2.rt, slider_3.rt)) %>%
+  select(- slider_1.rt,
+         - slider_2.rt,
+         - slider_3.rt)
 
 # renaming columns
 df <- df %>% dplyr::rename(
-    Gender = `Gender *`,
-    Age = `Age *`,
-    Education = starts_with("Highest level of education"))
+  within_block_order = block_name.thisTrialN,
+  block_order = choose_blocks.thisN,
+  Gender = `Gender *`,
+  Age = `Age *`,
+  Education = starts_with("Highest level of education"))
 
-# paste the name of the folders that contain the data
+# Adding data pertaining to the graphs: 
+
+# paste the name of the folder that contain the graph data
 path <- "U_graphs_1/summary_stats"
 
 # read the csvs
@@ -88,20 +100,21 @@ stats_summary <- read_csv(file.path(path, pattern = "all_summary.csv"))
 axis_summary <- read_csv(file.path(path, pattern = "axis_summary.csv"))
 blank_axis_summary <- read_csv(file.path(path, pattern = "blank_axis_summary.csv"))
 
-# check that the axis summary and blank axis summary data are identical
+# demonstrate that the axis summary and blank axis summary data are identical
 all(axis_summary$graph_id == blank_axis_summary$graph_id)
 all(axis_summary$`1` == blank_axis_summary$`1`)
 all(axis_summary$`2` == blank_axis_summary$`2`)
 
-# remove column with the x axis labels
+# in  stats_summary 
+# remove column with the x axis labels (not required)
 # THEN
 # recode the data in the 'label' column to refer to slider numbers
-# this will ultimately match the column headings in df
+# this will ultimately match the column headings in `df`
 # THEN
 # pivot to wide format, with separate columns for each cluster and statistic
 # names_glue() controls the ordering of column headers
 # THEN
-# graph_id is renamed graph_image so the column name matches df
+# graph_id is renamed graph_image so the column name matches `df`
 stats_summary <- stats_summary %>%
   select(- x) %>%
   mutate(label = recode(label,
@@ -112,12 +125,12 @@ stats_summary <- stats_summary %>%
               names_glue = "{label}.{.value}") %>%
   dplyr::rename(graph_image = graph_id)
 
-# renaming columns
+# renaming columns in axis_summary
 axis_summary <- axis_summary %>% rename(lower_lim = `1`,
                                         upper_lim = `2`,
                                         graph_image = graph_id)
 
-# adding prefix and suffix to match graph_image in df
+# adding prefix and suffix to match graph_image in `df`
 axis_summary$graph_image <- paste0("graphs/graph", axis_summary$graph_image, ".png")
 stats_summary$graph_image <- paste0("graphs/graph", stats_summary$graph_image, ".png")
 
@@ -127,34 +140,37 @@ df <- inner_join(df, axis_summary, by = "graph_image")
 # joining df and stats summary by 'graph_image' column
 df <- inner_join(df, stats_summary, by = "graph_image")
 
-# adding estimate columns, which translate participant response in numerical estimate
-# the response is multiplied by the range and added on to the lower limit
+# adding estimate columns, which translate participant response into a  numerical estimate
+# the response is multiplied by the range and added on to the lower y-axis limit
 df <- df %>% 
   mutate(slider_1.estimate = (lower_lim + (slider_1.response * (upper_lim - lower_lim))),
          slider_2.estimate = (lower_lim + (slider_2.response * (upper_lim - lower_lim))),
          slider_3.estimate = (lower_lim + (slider_3.response * (upper_lim - lower_lim))) 
          )
 
-# reading in graphs_book1, which provided the stats used to build the graphs
+# reading in graphs_book1, which provides the statistics used to build the graphs
 graphs_book1 <- read_csv(file.path(pattern = "U_graphs_1/graphs_book1.csv"))
 
-# adding prefix and suffix to match graph_image in df
+# adding prefix and suffix to match graph_image in `df`
 graphs_book1$graph_image <- paste0("graphs/graph", graphs_book1$graph_id, ".png") 
 
-# removing the contests of brackets from 'y_label' column
+# removing the contents of brackets from 'y_label' column
 graphs_book1$y_label <- str_remove(graphs_book1$y_label, " \\(.*\\)")
 
 # replace spaces with underscores
 graphs_book1$y_label <- str_replace_all(graphs_book1$y_label, " ", "_")
+# y_label will act as a block name column
+
+# rename ooo_pos as unique_xpos
+# (x-axis position of unique (odd-one-out) cluster)
+graphs_book1$unique_xpos <- graphs_book1$ooo_pos
 
 # select the necessary columns from graphs_book1
 # then join with df by 'graph_image'
 df <- graphs_book1 %>%
   select(y_label,
          graph_image,
-         ooo_pos,
-         y_min,
-         y_max
+         unique_xpos
          ) %>%
   inner_join(df, ., by = "graph_image")
 
@@ -169,39 +185,40 @@ df <- df %>%
          slider_3.z_score = (slider_3.estimate - slider_3.mean)/slider_3.sd
   ) 
 
-# First, I calculate the difference between the standard (same pop. mean)
-# and the odd-one-out (different pop. mean)
-# I take the average of the difference in z scores.
-# This generates a standardised difference measure.
-# I include rowwise() before this so that this is calculated for each row
+# First, I calculate the separation
+# between the unique clusters (different pop. mean)
+# and the non-unique clusters (same pop. mean)
+# This is divided by the corresponding y-axis range 
+# to generate a standardised  measure.
 # THEN
-# New column 'difference sign' - whether the difference is positive or negative
-# Positive = odd-one-out is higher than the standard
-# Negative = odd-one-out is lower than the standard
+# New column 'unique_ypos':
+# whether the unique value in the graph is positioned above or below
+# above = unique cluster is higher than the non-unique clusters
+# below = unique cluster is lower than the non-unique clusters
 # THEN
-# change values in the 'difference' column to absolute (remove sign)
+# change values in the 'separation' column to absolute (remove sign)
 df <- df %>% 
   rowwise() %>%
-  mutate(difference = case_when(ooo_pos == 1 ~ 
+  mutate(separation = case_when(unique_xpos == 1 ~ 
                                  (slider_1.mean - 
                                      mean(slider_2.mean, slider_3.mean)
                                   )/
-                                   (y_max - y_min),
-                                ooo_pos == 2 ~ 
+                                   (upper_lim - lower_lim),
+                                unique_xpos == 2 ~ 
                                   (slider_2.mean - 
                                      mean(slider_1.mean, slider_3.mean)
                                   )/
-                                  (y_max - y_min),
-                                ooo_pos == 3 ~ 
+                                  (upper_lim - lower_lim),
+                                unique_xpos == 3 ~ 
                                   (slider_3.mean - 
                                      mean(slider_1.mean, slider_2.mean)
                                   )/
-                                  (y_max - y_min)
+                                  (upper_lim - lower_lim)
   )
   ) %>%
-  mutate(difference_sign = case_when(difference > 0 ~ "Positive",
-                                     difference < 0 ~ "Negative")) %>% 
-  mutate(difference = abs(difference))
+  mutate(unique_ypos = case_when(separation > 0 ~ "above",
+                                     separation < 0 ~ "below")) %>% 
+  mutate(separation = abs(separation))
 
 # pivoting to longer format
 # 'cols' selects all the columns that have observations split by slider/cluster
@@ -216,7 +233,6 @@ df <- df %>%
 # containing corresponding values
 df <- df %>% 
   pivot_longer(cols = c(slider_1.response:slider_3.response,
-                        slider_1.rt:slider_3.rt,
                         slider_1.mean:slider_3.estimate,
                         slider_1.z_score:slider_3.z_score),
                names_to = c("slider", "measure"),
@@ -227,54 +243,23 @@ df <- df %>%
 df <- df %>% 
   mutate(slider = str_replace(slider, ".*_", "")) 
 
-# changing ooo_pos to character so that it can be compared to slider (which also character type)
-df$ooo_pos <- as.character(df$ooo_pos)
+# changing slider to double so that it can be compared to unique_xpos (which is also double)
+typeof(df$unique_xpos)
+typeof(df$slider)
+df$slider <- as.double(df$slider)
 
-# adding new column, 'is_ooo'
+# adding new column, 'is_unique'
 # TRUE if the row refers to observations on an 'odd-one-out' cluster
 # FALSE if the row refers to observations that aren't odd-ones-out
 df <- df %>%
   rowwise() %>%
-  mutate(is_ooo = case_when(ooo_pos == slider ~ TRUE,
-                            ooo_pos != slider ~ FALSE))
+  mutate(is_unique = case_when(unique_xpos == slider ~ TRUE,
+                               unique_xpos != slider ~ FALSE))
 
-df <- df %>%
-  rowwise() %>%
-  mutate(midpoint = min_value + ((max_value - min_value)/2)) %>%
-  mutate(st_midpoint = ((midpoint - lower_lim)/(upper_lim - lower_lim)))
-
+# adding new column, 'height': standardised measure of vertical (y-axis) position
 df <- df %>%
   rowwise() %>%
   mutate(height = ((mean - lower_lim)/(upper_lim - lower_lim))) 
-
-df <- df %>%
-  rowwise() %>%
-  mutate(diff.est_mean = response - height,
-         diff.est_st_midpoint = response - st_midpoint)
-  
-mean(df$diff.est_mean)
-mean(df$diff.est_st_midpoint)
-
-
-
-df %>% ggplot(aes(x = z_score,
-                  y = (estimate-mean),
-                  colour = y_label)) +
-  geom_jitter(alpha= 0.1) +
-  facet_wrap(~ y_label, scales = "free_y")
-
-df %>% ggplot(aes(x = difference,
-                  y = z_score,
-                  colour = y_label)) +
-  geom_jitter(alpha= 0.1) +
-  facet_wrap(~ y_label, scales = "free_y")
-
-library(ggridges)
-df %>%
-  ggplot(aes(x = height,
-             y = is_ooo)) + 
-  geom_density_ridges(alpha = 0.5) +
-  geom_boxplot()
   
 
 # VISUALISATION AND ANALYSIS####
@@ -282,34 +267,77 @@ df %>%
 # checking for missing values
 vis_miss(df)
 
-# coding 'is_ooo' and 'difference_sign' as factors
-df$is_ooo <- as.factor(df$is_ooo)
-df$difference_sign <- as.factor(df$difference_sign)
+# participant info
+df$participant <- as.character(df$participant)
+
+participant_info <- df %>%
+  select(participant, Age, Gender) %>%
+  distinct(distinct_values = participant, .keep_all = TRUE)
+
+unique(participant_info$Gender)
+
+participant_info <- participant_info %>% 
+  mutate(Gender = tolower(Gender))
+unique(participant_info$Gender)
+
+# checking that participant has not mixed up input of gender and age
+participant_info %>%
+  filter(Gender == "19") %>%
+  select(participant, Age, Gender) 
+
+participant_info <- participant_info %>%
+  mutate(
+    Gender = recode(Gender, "m" = "male"),
+    Gender = recode(Gender, "19" = "NA"))  
+unique(participant_info$Gender)
+
+participant_info %>% 
+  count(Gender) %>% 
+  as.data.frame() %>%
+  mutate(percentage = n/sum(n))
+
+mean(participant_info$Age)
+
+length(unique(participant_info$participant))
+
+
+
+
+
+
+
+
+
+
+
+
+# coding 'is_unique' and 'unique_ypos' as factors
+df$is_unique <- as.factor(df$is_unique)
+df$unique_ypos <- as.factor(df$unique_ypos)
 
 # checking the distribution of the DV (z_score)
+# Cullen and Frey plot:
 descdist(df$z_score)
-# there is almost no skew but very high kurtosis - check effects on LMMs
+# histogram: there is almost no skew but very high kurtosis
 hist(df$z_score)
-
-df %>% ggplot(aes(x = z_score)) + 
-  geom_dotplot(binwidth = 0.5) +
-  scale_y_continuous(NULL, breaks = NULL)
 
 # summary stats
 mean(df$z_score)
-# on average, there is slight over-estimation
 sd(df$z_score)
+# on average, there is slight over-estimation
 
-qts <- quantile(df$z_score,probs=c(.025,.975))
+# because kurtosis is high, the 95% CI for the mean does not include 95% of responses
+# here, I visualise 95% of responses against the histogram
+qts <- quantile(df$z_score, probs = c(.025,.975))
 hist(df$z_score)
 abline(v=qts[1],col="red")
 abline(v=qts[2],col="red")
 abline(v=mean(df$z_score),col="blue")
-qts
-CI(df$z_score, ci=0.95)
+qts[1]
+qts[2]
 
+# t-test: the true mean is not equal to 0
 t.test(df$z_score)
-
 
 # visualising z_scores individually for each participant
 # participant 71 produced the unusually high estimates
@@ -319,294 +347,235 @@ df %>%
   geom_point(alpha = 0.1) +
   stat_summary(fun = mean, size = 0.1, colour = "red")
 
-# is ooo or standard more accurate?
+# null model: no fixed effects
+null_model <- lmer(z_score ~ 
+                     (1 | participant) + 
+                     (1 | graph_image), 
+                   data = df)
+
+# MODEL 1:
+# are unique or non-unique clusters more accurate?
 df %>%
   ggplot(aes(y = z_score,
-             x = difference_sign)) +
+             x = is_unique)) +
   geom_boxplot(outlier.shape = NA) +
   coord_cartesian(ylim = c(-1.8, 1.8))
 
-model1 <- lmer(z_score ~ is_ooo +
+uniqueness <- lmer(z_score ~ is_unique +
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
-model1_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model1, model1_null)
-summary(model1)
-# no difference between ooo and standard
 
-# visualisation of mean z-score against difference 
-# for each slider on each trial
-# suggests over-estimation,generally, varying at different levels of difference
+tests <- tidy(uniqueness) %>% 
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model1"))
+
+# MODEL 2:
+# how does separation between unique and non-unique clusters affect accuracy?
 df %>%
-  ggplot(aes(x = difference,
+  ggplot(aes(x = separation,
              y = z_score)) +
-  geom_smooth(method = lm) +
-  #geom_smooth() +
-  stat_summary(fun = mean, size = 0.1, 
-               mapping = aes(colour = slider))
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = lm)
 
-model2 <- lmer(z_score ~ difference +
+separation <- lmer(z_score ~ separation +
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
-model2_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model2, model2_null)
-summary(model2)
-# no effect of difference
 
-# there doesn't seem to be an interaction between difference and is_ooo
-df %>% 
-  ggplot(aes(x = difference,
-             y = z_score,
-             colour = is_ooo)) +
-  geom_smooth(method = lm) +
-  stat_summary(fun = mean, size = 0.1)
+tests <- tidy(separation) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model2")) %>%
+  rbind(tests) 
 
-model3 <- lmer(z_score ~ difference*is_ooo +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
-model3_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model3, model3_null)
-summary(model3)
-# no main effects or interactions
-
-# is negative or positive difference sign more accurate?
+# MODEL 3:
+# how does relative position of unique clusters affect accuracy?
 df %>%
   ggplot(aes(y = z_score,
-             x = difference_sign)) +
+             x = unique_ypos)) +
   geom_boxplot(outlier.shape = NA) +
   coord_cartesian(ylim = c(-1.8, 1.8))
 
-model4 <- lmer(z_score ~ difference_sign +
-                 (1 + difference_sign | participant) + 
-                 (1 | graph_image), 
-               data = df)
-model4_null <- lmer(z_score ~ 
-                      (1 + difference_sign | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model4, model4_null)
-summary(model4)
-# no effect for difference_sign
+unique_ypos <- lmer(z_score ~ unique_ypos +
+                          (1 | participant) + 
+                          (1 | graph_image), 
+                        data = df)
 
-# plotting z_score separately for positive and negative difference
-# and separately for instances where
-# cluster is the standard (FALSE)
-# and cluster is the odd-one-out (TRUE)
-# looks like there might be a slight tendency 
-# to over-estimate the physically higher clusters
-# (the standard in negative cases and the odd-one-out in positive cases)
-df %>%
-  ggplot(aes(x = difference_sign,
+tests <- tidy(unique_ypos) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model3")) %>%
+  rbind(tests) 
+
+# MODEL 4:
+# Interaction between separation and uniqueness
+df %>% 
+  ggplot(aes(x = separation,
              y = z_score,
-             colour = is_ooo)) +
-  geom_boxplot(outlier.shape = NA) +
-  coord_cartesian(ylim = c(-1.6, 1.6)) 
+             colour = is_unique)) +
+  geom_smooth(method = lm) 
 
-model5 <- lmer(z_score ~ difference_sign*is_ooo +
+separation_uniqueness <- lmer(z_score ~ separation*is_unique +
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
-model5_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model5, model5_null)
-summary(model5)
-# no interaction or main effects
 
-# there doesn't seem to be an interaction between difference and difference_sign
-df %>% 
-  ggplot(aes(x = difference,
+tests <- tidy(separation_uniqueness) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model4")) %>%
+  rbind(tests) 
+
+# MODEL 5:
+# Interaction between relative position of unique clusters and uniqueness
+df %>%
+  ggplot(aes(x = unique_ypos,
              y = z_score,
-             colour = difference_sign)) +
-  geom_smooth(method = lm) +
-  stat_summary(fun = mean, size = 0.1) +
-  facet_wrap(~ is_ooo)
+             colour = is_unique)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(ylim = c(-1.8, 1.8)) 
 
-model6 <- lmer(z_score ~ difference*difference_sign +
-                 (1 + difference_sign | participant) + 
-                 (1 | graph_image), 
-               data = df)
-model6_null <- lmer(z_score ~ 
-                      (1 + difference_sign | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model6, model6_null)
-summary(model6)
-# experimental model is not significant over null model, 
-# but interaction is significant within experimental model
+unique_ypos_uniqueness <- lmer(z_score ~ unique_ypos*is_unique +
+                                 (1 | participant) + 
+                                 (1 | graph_image), 
+                               data = df)
 
-# visualisation of mean z-score against z_mean (standardised actual height)
-# suggests that over-estimation increases when clusters are higher on the y axis
+tests <- tidy(unique_ypos_uniqueness) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model5")) %>%
+  rbind(tests) 
+library(emmeans)
+emmeans(unique_ypos_uniqueness, pairwise ~ unique_ypos)
+
+# MODEL 6:
+# Interaction between separation and relative position of unique clusters
+df %>% 
+  ggplot(aes(x = separation,
+             y = z_score,
+             colour = unique_ypos)) +
+  #geom_point(alpha = 0.1, colour = "black") +
+  geom_smooth(method = lm) 
+
+separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos + extension_difference +
+                                     (1 | participant) + 
+                                     (1 | graph_image), 
+                                   data = df)
+
+tests <- tidy(separation_unique_ypos) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(MODEL = rep("Model6")) %>%
+  rbind(tests) %>%
+  arrange(MODEL)
+
+summary(separation_unique_ypos)
+simple_slopes(separation_unique_ypos)
+ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos, v.co = extension_difference)
+ss
+ss$slopes
+ss$ints
+plot(ss)
+
+# MODEL 7:
+# Effect of height (vertical y axis position) on estimates
 df %>%
   ggplot(aes(x = height,
              y = z_score)) +
   geom_point(alpha = 0.05) +
   geom_smooth(method = lm )
-  #geom_smooth() +
-  #stat_summary(fun = mean, size = 0.1)
 
-model7 <- lmer(z_score ~ height +
+df %>%
+  ggplot(aes(x = height,
+             y = z_score)) +
+  geom_smooth(method = lm )
+
+height <- lmer(z_score ~ height + extension_difference + 
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
-model7_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model7, model7_null)
-summary(model7)
-# experimental model is  significant over null model, 
-# but interaction is significant within experimental model
 
-# but maybe this is only true for the standard, not the ooo
+anova(height, null_model)
+summary(height)
+
+
+# MODEL 8
+# Interaction between height and relative position of unique clusters
+df %>% 
+  ggplot(aes(x = height,
+             y = z_score,
+             colour = unique_ypos)) +
+  geom_point(alpha = 0.1, colour = "black") +
+  geom_smooth(method = lm)
+
+height_unique_ypos <- lmer(z_score ~ height*unique_ypos +
+                 (1 | participant) + 
+                 (1 | graph_image), 
+               data = df)
+
+anova(height_unique_ypos, null_model)
+summary(height_unique_ypos)
+
+
+# MODEL 9:
+# Interaction between height and magnitude of separation
+df %>% 
+  ggplot(aes(x = height,
+             y = z_score,
+             colour = separation)) +
+  geom_point(alpha = 0.1, colour = "black") +
+  geom_smooth(method = lm)
+
+height_separation <- lmer(z_score ~ height*separation +
+                                 (1 | participant) + 
+                                 (1 | graph_image), 
+                               data = df)
+anova(height_separation, null_model)
+summary(height_separation)
+
+# MODEL 10:
+# Interaction between height and uniqueness
 df %>%
   ggplot(aes(x = height,
              y = z_score,
-             colour = is_ooo)) +
-  geom_point(alpha = 0.01) +
-  geom_smooth(method = lm) 
-  #coord_cartesian(ylim = c(-2.5, 2.5)) 
-  #facet_wrap(~ difference_sign)
+             colour = is_unique)) +
+  geom_point(alpha = 0.1, colour = "black") +
+  geom_smooth(method = lm)
 
-model8 <- lmer(z_score ~ height*is_ooo +
+height_uniqueness <- lmer(z_score ~ height*is_unique + extension_difference +
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
-model8_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model8, model8_null)
-summary(model8)
 
+anova(height_uniqueness, null_model)
+summary(height_uniqueness)
 
-library(interactions)
-library(jtools)
-summ(model8)
-interact_plot(model8, pred = height, modx = is_ooo, plot.points = FALSE) + theme_apa()
-ss <- sim_slopes(model8, pred = height, modx = is_ooo, johnson_neyman = FALSE)
+df %>%
+  group_by(is_unique, unique_ypos) %>%
+  summarise(height = mean(height))
+
+# simple slopes analysis
+ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique, johnson_neyman = FALSE)
 ss
 ss$slopes
 ss$ints
-
-library(ggstance)
-plot(ss)
-dd <- probe_interaction(model8, pred = height, modx = is_ooo, cond.int = TRUE,
-                  interval = TRUE,  jnplot = FALSE)
-dd
-dd$simslopes$slopes
-dd$simslopes$ints
-
-# suggests the increase in error as height increases is bigger
-# where there is a negative ooo than a positive ooo
-df %>%
-  ggplot(aes(x = height,
-             y = z_score,
-             colour = difference_sign)) +
-  geom_smooth(method = lm)
-  #geom_point() +
-  #stat_summary(fun = mean, size = 0.1) +
-  #facet_wrap(~ is_ooo)
-
-model8 <- lmer(z_score ~ height*is_ooo +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
-model8_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df)
-anova(model8, model8_null)
-summary(model8)
-
-model9a <- lmer(z_score ~ height*is_ooo + difference +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df,
-               REML = FALSE)
-model9b <- lmer(z_score ~ height*is_ooo + difference_sign +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df,
-               REML = FALSE)
-model9c <- lmer(z_score ~ height*is_ooo + difference*difference_sign +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df,
-               REML = FALSE)
-model9d <- lmer(z_score ~ height*is_ooo +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df,
-               REML = FALSE)
-model9_null <- lmer(z_score ~ 
-                      (1 | participant) + 
-                      (1 | graph_image), 
-                    data = df,
-                    REML = FALSE)
+p <- plot(ss)
+p + p
 # fitted all with REML = FALSE
 # this changes values on performance spider diagram
 # work out what is happening here
-plot(compare_performance(model9a, 
-                         model9b,
-                         model9c,
-                         model9d,
-                         model9_null,
-                         rank = TRUE))
-anova(model9d, model9_null)
-summary(model9d)
-
-# investigating effect of learning:
-df %>%
-  ggplot(aes(x = presentation,
-             y = z_score)) +
-  stat_summary(fun = mean, size = 0.1, 
-               mapping = aes(colour = slider)) +
-  geom_smooth()
-
-# no effect of learning
-model8 <- lmer(z_score ~ diff.est_mean + diff.est_st_midpoint +
-                 (1 | participant) +
-                 (1 | graph_image), 
-               data = df)
-model8_null <- lmer(z_score ~ 
-                      (1 | participant) +
-                      (1 | graph_image),
-                    data = df)
-anova(model8_null, model8)
-summary(model8)
-
 check_model(model8)
-model_performance(model8)
-plot(compare_performance(model7, 
-                         model6, 
-                         model5, 
-                         model4, 
-                         model3, 
-                         model2, 
-                         model1,
-                         rank = TRUE))
-plot(compare_performance(model7, model7_null))
-plot(compare_performance(model7, model7_null, model4))
-model_parameters(model7)
-plot_model(model7,
+model_performance(height_uniqueness)
+plot(compare_performance(separation_unique_ypos, 
+                         height_uniqueness))
+model_parameters(height_uniqueness)
+plot_model(height_uniqueness,
            show.values = TRUE,
            value.offset = .4)
 plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
-standardize_parameters(model6)
+standardize_parameters(separation_unique_ypos)
 eta_squared(model6)
 anova(model7)
 F_to_eta2(
@@ -683,44 +652,81 @@ build_this_one %>%
                      expand = c(0, 0), limits = c(y_min, y_max)) 
 
 
-# demographics
-unique(df$Gender)
-df %>%
-  filter(Gender == "19") %>%
-  select(Age, participant) %>%
-  count(participant)
 
-r <- df %>%
-  mutate(Gender = select(ifelse(starts_with("m", ignore.case = TRUE)), 3))
-         
 
-df <- df %>% mutate(Gender = tolower(Gender))
-unique(df$Gender)
 df <- df %>%
-  mutate(
-    Gender = recode(Gender, "m" = "male"),
-    Gender = recode(Gender, "19" = "NA"))  
+  rowwise() %>%
+  mutate(upper_extension = (max_value - mean)/(upper_lim - lower_lim),
+         lower_extension = (mean - min_value)/(upper_lim - lower_lim),
+         extension_difference = upper_extension - lower_extension
+         ) %>%
+  mutate(extension_sign = case_when(extension_difference > 0 ~ "above",
+                                 extension_difference < 0 ~ "below")) 
 
-gender <- df %>%
-  group_by(Gender) %>%
-  summarise(n = n()) %>%
-  mutate(n = n/72)
-gender
-sum(gender$n)
+hist(df$extension_difference)
 
-rrr <- df %>% group_by(participant, Gender) %>% count()
-rrr
-unique(rrr$n)
-rrr %>%
-  filter(n == 81)
+df %>%
+  group_by(graph_image, slider) %>%
+  ggplot(aes(x = upper_extension,
+         y= lower_extension)) +
+  geom_point()
 
-p71 <- df %>%
-  filter(participant == 71) %>%
-  get_dupes(graph_image)
+summary(esp)
 
-mean(df$Age)
-sd(df$Age)
+esp <- lmer(z_score ~ extension_difference +
+              (1 | participant) +
+              (1 | graph_image),
+            df)
 
-unique(participant)
+# next move is to see how big this difference is compared to the difference in estimates
+# also it doesn't really explain why over-estimation would change with height
 
-#Change difference_sign to ooo_pos (above/below)
+df %>%
+  ggplot(aes(x = extension_difference,
+             y = height)) +
+  geom_point(alpha = 0.01) +
+  geom_smooth(method = lm)
+
+
+
+model <- lmer(Sepal.Width ~ Sepal.Length * Petal.Length + (1|Species), data=iris)
+summary(model)
+ppp <- simple_slopes(model)
+print(ppp)
+simple_slopes(model,
+              levels=list(Sepal.Length=c(4, 5, 6, 'sstest'),
+                          Petal.Length=c(2, 3, 'sstest')))
+ 
+
+m1ps <- plotSlopes(height_uniqueness, 
+                   modx = "uniqueness", 
+                   plotx = "height", 
+                   n=2, 
+                   modxVals=c("above", "below"))
+m1psts <- testSlopes(m1ps)
+round(m1psts$hypotests,4)
+
+simple_slopes(height,
+              levels=list(Sepal.Length=c(0.2, 0.5, 0.8, 'sstest')))
+
+interact_plot(height_uniqueness, pred = height, modx = is_unique)
+sim_slopes(height_uniqueness, pred = height, modx = is_unique)
+ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique)
+ss$slopes
+ss$ints
+plot(ss)
+
+
+interact_plot(separation_unique_ypos, pred = separation, modx = unique_ypos) + theme_apa()
+sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
+ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
+ss$slopes
+ss$ints
+plot(ss)
+coef(separation_unique_ypos)
+
+summary(separation_unique_ypos) %>%
+  coef()
+
+e <- allEffects(separation_unique_ypos)
+print(e)
