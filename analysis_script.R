@@ -30,6 +30,7 @@ df <- df %>% select(participant,
                     block_name.thisTrialN,
                     choose_blocks.thisN,
                     key_resp_debrief.keys,
+                    time_taken,
                     `Age *`,
                     `Gender *`,
                     `Highest level of education completed so far (e.g~ High school/grade (US); GCSE/Secondary School (UK); A-Levels; Bachelor's degree etc~) *`
@@ -262,54 +263,61 @@ df <- df %>%
   mutate(height = ((mean - lower_lim)/(upper_lim - lower_lim))) 
   
 
+
 # VISUALISATION AND ANALYSIS####
 
 # checking for missing values
 vis_miss(df)
 
-# participant info
+# PARTICIPANT INFO
+
+# changing participant to character (it is not numerical)
 df$participant <- as.character(df$participant)
 
+# creating a new data frame, with only required columns
+# and only one row for each participant
 participant_info <- df %>%
-  select(participant, Age, Gender) %>%
+  select(participant, Age, Gender, time_taken) %>%
   distinct(distinct_values = participant, .keep_all = TRUE)
 
+# looking at the unique values of 'Gender'
 unique(participant_info$Gender)
 
+# changing every value of Gender to lowercase
 participant_info <- participant_info %>% 
   mutate(Gender = tolower(Gender))
 unique(participant_info$Gender)
 
-# checking that participant has not mixed up input of gender and age
+# checking whether this participant has mixed up input of gender and age
 participant_info %>%
   filter(Gender == "19") %>%
   select(participant, Age, Gender) 
 
+# changing 'm' to 'male
+# and changing '19' to NA
 participant_info <- participant_info %>%
   mutate(
     Gender = recode(Gender, "m" = "male"),
     Gender = recode(Gender, "19" = "NA"))  
 unique(participant_info$Gender)
 
+# calculating percentages of each gender
 participant_info %>% 
   count(Gender) %>% 
   as.data.frame() %>%
   mutate(percentage = n/sum(n))
 
+# calculating mean age
 mean(participant_info$Age)
 
+# counting how many participants
 length(unique(participant_info$participant))
 
+# average time taken
+mean(participant_info$time_taken)
 
 
-
-
-
-
-
-
-
-
+# ANALYSIS
 
 # coding 'is_unique' and 'unique_ypos' as factors
 df$is_unique <- as.factor(df$is_unique)
@@ -369,7 +377,7 @@ uniqueness <- lmer(z_score ~ is_unique +
 tests <- tidy(uniqueness) %>% 
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model1"))
+  cbind(Model = rep("Model1"))
 
 # MODEL 2:
 # how does separation between unique and non-unique clusters affect accuracy?
@@ -387,7 +395,7 @@ separation <- lmer(z_score ~ separation +
 tests <- tidy(separation) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model2")) %>%
+  cbind(Model = rep("Model2")) %>%
   rbind(tests) 
 
 # MODEL 3:
@@ -406,7 +414,7 @@ unique_ypos <- lmer(z_score ~ unique_ypos +
 tests <- tidy(unique_ypos) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model3")) %>%
+  cbind(Model = rep("Model3")) %>%
   rbind(tests) 
 
 # MODEL 4:
@@ -425,17 +433,30 @@ separation_uniqueness <- lmer(z_score ~ separation*is_unique +
 tests <- tidy(separation_uniqueness) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model4")) %>%
+  cbind(Model = rep("Model4")) %>%
   rbind(tests) 
 
 # MODEL 5:
 # Interaction between relative position of unique clusters and uniqueness
 df %>%
-  ggplot(aes(x = unique_ypos,
+  mutate(relative_position = case_when(is_unique = TRUE |
+                                         unique_ypos = "above" ~ "above"))
+  ggplot(aes(x = is_unique,
              y = z_score,
-             colour = is_unique)) +
+             colour = unique_ypos)) +
   geom_boxplot(outlier.shape = NA) +
-  coord_cartesian(ylim = c(-1.8, 1.8)) 
+  coord_cartesian(ylim = c(-1.8, 1.8)) +
+  theme_minimal(base_size=20, 
+                base_family="Helvetica") +
+  #labs(title = "Relationship Between Cluster Uniqueness\nand Relative Position",
+       #x = "Cluster Uniqueness",
+       #y = "Estimate (z-score)",
+       #colour = "Position Relative to Other Cluster(s)")  +
+  #scale_colour_discrete(labels = c('Above','Below')) +
+  #scale_x_discrete(labels = c('Duplicated','Unique')) +
+  theme(legend.position="right")
+
+
 
 unique_ypos_uniqueness <- lmer(z_score ~ unique_ypos*is_unique +
                                  (1 | participant) + 
@@ -445,10 +466,8 @@ unique_ypos_uniqueness <- lmer(z_score ~ unique_ypos*is_unique +
 tests <- tidy(unique_ypos_uniqueness) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model5")) %>%
+  cbind(Model = rep("Model5")) %>%
   rbind(tests) 
-library(emmeans)
-emmeans(unique_ypos_uniqueness, pairwise ~ unique_ypos)
 
 # MODEL 6:
 # Interaction between separation and relative position of unique clusters
@@ -459,7 +478,7 @@ df %>%
   #geom_point(alpha = 0.1, colour = "black") +
   geom_smooth(method = lm) 
 
-separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos + extension_difference +
+separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos +
                                      (1 | participant) + 
                                      (1 | graph_image), 
                                    data = df)
@@ -467,9 +486,22 @@ separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos + extension_diff
 tests <- tidy(separation_unique_ypos) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(MODEL = rep("Model6")) %>%
+  cbind(Model = rep("Model6")) %>%
   rbind(tests) %>%
-  arrange(MODEL)
+  arrange(Model) %>%
+  select(Model, 
+         term:p.value,
+         - effect,
+         - group)
+
+tests$estimate <- round(tests$estimate, 2)
+tests$std.error <- round(tests$std.error, 2)
+tests$statistic <- round(tests$statistic, 2)
+tests$df <- round(tests$df, 2)
+tests$p.value <- round(tests$p.value, 3)
+
+write_csv(tests, file.path("model1-6_summary"))
+
 
 summary(separation_unique_ypos)
 simple_slopes(separation_unique_ypos)
@@ -499,7 +531,6 @@ height <- lmer(z_score ~ height + extension_difference +
 
 anova(height, null_model)
 summary(height)
-
 
 # MODEL 8
 # Interaction between height and relative position of unique clusters
@@ -557,32 +588,77 @@ df %>%
   summarise(height = mean(height))
 
 # simple slopes analysis
-ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique, johnson_neyman = FALSE)
+ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique)
+
 ss
 ss$slopes
 ss$ints
-p <- plot(ss)
-p + p
-# fitted all with REML = FALSE
-# this changes values on performance spider diagram
-# work out what is happening here
-check_model(model8)
-model_performance(height_uniqueness)
-plot(compare_performance(separation_unique_ypos, 
-                         height_uniqueness))
-model_parameters(height_uniqueness)
-plot_model(height_uniqueness,
-           show.values = TRUE,
-           value.offset = .4)
-plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
-standardize_parameters(separation_unique_ypos)
-eta_squared(model6)
-anova(model7)
-F_to_eta2(
-  f = c(16.2328),
-  df = c(1),
-  df_error = c(4733)
-)
+plot(ss)
+
+# MODEL 11:
+# extension_difference
+df <- df %>%
+  rowwise() %>%
+  mutate(upper_extension = (max_value - mean)/(upper_lim - lower_lim),
+         lower_extension = (mean - min_value)/(upper_lim - lower_lim),
+         extension_difference = upper_extension - lower_extension) 
+
+hist(df$extension_difference)
+
+df %>%
+  ggplot(aes(x = extension_difference,
+             y = z_score)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = lm) +
+  theme_minimal()
+
+extension_difference <- lmer(z_score ~ extension_difference +
+              (1 | participant) +
+              (1 | graph_image),
+            df)
+summary(extension_difference)
+
+# MODEL 12:
+# adding extension_difference as a covariate 
+# to see whether it can explain away existing significant interaction
+# between separation and separation sign (MODEL 6)
+
+separation_unique_ypos_ed <- lmer(z_score ~ separation*unique_ypos + extension_difference +
+                                 (1 | participant) + 
+                                 (1 | graph_image), 
+                               data = df)
+summary(separation_unique_ypos_ed)
+
+interact_plot(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
+sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
+ss <- sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
+ss$slopes
+ss$ints
+plot(ss)
+coef(separation_unique_ypos)
+
+# MODEL 13:
+# adding extension_difference as a covariate 
+# to see whether it can explain away existing significant interaction
+# between height and uniqueness (MODEL 6)
+
+height_uniqueness_ed <- lmer(z_score ~ height*is_unique + extension_difference +
+                                    (1 | participant) + 
+                                    (1 | graph_image), 
+                                  data = df)
+summary(height_uniqueness_ed)
+
+interact_plot(height_uniqueness_ed, pred = height, modx = is_unique)
+sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
+ss <- sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
+ss$slopes
+ss$ints
+plot(ss)
+
+
+
+
+
 
 theme_mres <- function() {
   theme_minimal(base_size=2.7, base_family="Helvetica") +
@@ -651,82 +727,15 @@ build_this_one %>%
   scale_y_continuous(sec.axis = dup_axis(),
                      expand = c(0, 0), limits = c(y_min, y_max)) 
 
-
-
-
-df <- df %>%
-  rowwise() %>%
-  mutate(upper_extension = (max_value - mean)/(upper_lim - lower_lim),
-         lower_extension = (mean - min_value)/(upper_lim - lower_lim),
-         extension_difference = upper_extension - lower_extension
-         ) %>%
-  mutate(extension_sign = case_when(extension_difference > 0 ~ "above",
-                                 extension_difference < 0 ~ "below")) 
-
-hist(df$extension_difference)
-
-df %>%
-  group_by(graph_image, slider) %>%
-  ggplot(aes(x = upper_extension,
-         y= lower_extension)) +
-  geom_point()
-
-summary(esp)
-
-esp <- lmer(z_score ~ extension_difference +
-              (1 | participant) +
-              (1 | graph_image),
-            df)
-
-# next move is to see how big this difference is compared to the difference in estimates
-# also it doesn't really explain why over-estimation would change with height
-
-df %>%
-  ggplot(aes(x = extension_difference,
-             y = height)) +
-  geom_point(alpha = 0.01) +
-  geom_smooth(method = lm)
-
-
-
-model <- lmer(Sepal.Width ~ Sepal.Length * Petal.Length + (1|Species), data=iris)
-summary(model)
-ppp <- simple_slopes(model)
-print(ppp)
-simple_slopes(model,
-              levels=list(Sepal.Length=c(4, 5, 6, 'sstest'),
-                          Petal.Length=c(2, 3, 'sstest')))
- 
-
-m1ps <- plotSlopes(height_uniqueness, 
-                   modx = "uniqueness", 
-                   plotx = "height", 
-                   n=2, 
-                   modxVals=c("above", "below"))
-m1psts <- testSlopes(m1ps)
-round(m1psts$hypotests,4)
-
-simple_slopes(height,
-              levels=list(Sepal.Length=c(0.2, 0.5, 0.8, 'sstest')))
-
-interact_plot(height_uniqueness, pred = height, modx = is_unique)
-sim_slopes(height_uniqueness, pred = height, modx = is_unique)
-ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique)
-ss$slopes
-ss$ints
-plot(ss)
-
-
-interact_plot(separation_unique_ypos, pred = separation, modx = unique_ypos) + theme_apa()
-sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
-ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
-ss$slopes
-ss$ints
-plot(ss)
-coef(separation_unique_ypos)
-
-summary(separation_unique_ypos) %>%
-  coef()
-
-e <- allEffects(separation_unique_ypos)
-print(e)
+# fitted all with REML = FALSE
+# this changes values on performance spider diagram
+# work out what is happening here
+check_model(model8)
+model_performance(height_uniqueness)
+plot(compare_performance(separation_unique_ypos, 
+                         height_uniqueness))
+model_parameters(height_uniqueness)
+plot_model(height_uniqueness,
+           show.values = TRUE,
+           value.offset = .4)
+plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
