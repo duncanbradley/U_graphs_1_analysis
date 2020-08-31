@@ -1,8 +1,27 @@
 library(tidyverse)
 
+# PROLIFIC DATA ####
+# paste the name of the folder that contains the data
+location <- dir("Downloads") # get file names
+
+# read the csv as 'all'
+prolific_data <- read_csv(file.path("prolific_export.csv")) 
+
+# including only those approved and excluding those with NOCODE (explanations below)
+# dividing time_taken by 60 to get minutes
+# renaming participant_id as participant to match pavlovia data
+# then  selecting only participant and time_taken columns
+prolific_data <- prolific_data %>%
+  filter(status == "APPROVED") %>%
+  filter(entered_code != "NOCODE") %>%
+  mutate(time_taken = time_taken/60) %>%
+  rename(participant = participant_id) %>%
+  select(participant,
+         time_taken)
+
 # PAVLOVIA DATA ####
 # paste the name of the folder that contains the data
-folder <- "Understanding_Graphs_1_41319_2020-08-11_07h03"
+folder <- "Understanding_Graphs_1_41319_2020-08-31_16h49"
 
 # locate the (only) csv file
 csv_file <- dir(folder, pattern = "*.csv") # get file names
@@ -18,6 +37,10 @@ all <- all %>% filter(participant != "test1")
 
 # put each Prolific ID in a vector, each occurring once
 keys <- unique(all$participant)
+
+# joining time_taken data from prolific_data dataframe
+all <- inner_join(all, prolific_data, 
+           by = "participant")
 
 # creates a vector of numbers from 1 to the number of participants
 vals <- 1:length(keys)
@@ -36,19 +59,7 @@ all <- all %>%
 # write new csv
 write_csv(all, "U_graphs_1_data.csv")
 
-# PROLIFIC DATA ####
-# paste the name of the folder that contains the data
-location <- dir("Downloads") # get file names
 
-# read the csv as 'all'
-prolific_data <- read_csv(file.path("prolific_export.csv")) 
-
-prolific_data <- prolific_data %>%
-  filter(status == "APPROVED") %>%
-  filter(entered_code != "NOCODE") %>%
-  mutate(time_taken = time_taken/60)
-
-mean(prolific_data$time_taken)
 
 # "I finished the experiment, 
 # reached the last page where I was told that all the data was fictional 
@@ -63,8 +74,8 @@ mean(prolific_data$time_taken)
 # but at the end, there appeard an info that I encountered the following error: 
 # when uploading participant's results for experiment: 
 # ExPrag_UoM/understanging_graphs_1 Has my submission been saved?"
-# recorded time = 9 mins
-# also has NOCODE as entered_code
+# # # recorded time = 9 mins
+# # # also has NOCODE as entered_code
 
 # VISUALISE DATA TO CHECK RESPONSES - FOR APPROVING SUBMISSIONS ####
 # graphs 53 and 58
