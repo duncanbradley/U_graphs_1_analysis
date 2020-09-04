@@ -7,6 +7,7 @@ library(performance)
 library(naniar)
 library(broom.mixed)
 library(interactions)
+library(patchwork)
 
 # DATA WRANGLING ####
 
@@ -483,6 +484,8 @@ separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos +
                                      (1 | graph_image), 
                                    data = df)
 
+summary(separation_unique_ypos)
+
 tests <- tidy(separation_unique_ypos) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
@@ -504,8 +507,7 @@ write_csv(tests, file.path("model1-6_summary"))
 
 
 summary(separation_unique_ypos)
-simple_slopes(separation_unique_ypos)
-ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos, v.co = extension_difference)
+ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
 ss
 ss$slopes
 ss$ints
@@ -524,7 +526,7 @@ df %>%
              y = z_score)) +
   geom_smooth(method = lm )
 
-height <- lmer(z_score ~ height + extension_difference + 
+height <- lmer(z_score ~ height + 
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
@@ -575,7 +577,7 @@ df %>%
   geom_point(alpha = 0.1, colour = "black") +
   geom_smooth(method = lm)
 
-height_uniqueness <- lmer(z_score ~ height*is_unique + extension_difference +
+height_uniqueness <- lmer(z_score ~ height*is_unique + 
                  (1 | participant) + 
                  (1 | graph_image), 
                data = df)
@@ -608,7 +610,7 @@ hist(df$extension_difference)
 df %>%
   ggplot(aes(x = extension_difference,
              y = z_score)) +
-  geom_point(alpha = 0.1) +
+  #geom_point(alpha = 0.1) +
   geom_smooth(method = lm) +
   theme_minimal()
 
@@ -628,10 +630,12 @@ separation_unique_ypos_ed <- lmer(z_score ~ separation*unique_ypos + extension_d
                                  (1 | graph_image), 
                                data = df)
 summary(separation_unique_ypos_ed)
+anova(separation_unique_ypos_ed, separation_unique_ypos)
 
 interact_plot(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
 sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
 ss <- sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
+ss
 ss$slopes
 ss$ints
 plot(ss)
@@ -648,7 +652,7 @@ height_uniqueness_ed <- lmer(z_score ~ height*is_unique + extension_difference +
                                   data = df)
 summary(height_uniqueness_ed)
 
-interact_plot(height_uniqueness_ed, pred = height, modx = is_unique)
+interact_plot(height_uniqueness, pred = height, modx = is_unique)
 sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
 ss <- sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
 ss$slopes
@@ -680,8 +684,8 @@ theme_mres <- function() {
     )
 }
 
-index <- 53
-
+index <- 36
+53
 # the following function takes the parameters of a dataset and uses them to 
 # build a dataframe. 
 create_df <- function(my_df){
@@ -717,15 +721,26 @@ build_this_one <- build_this_one %>%
 set.seed(1234 +index)
 build_this_one %>% 
   ggplot(aes(x = x, y = y)) +
-  geom_jitter(width = .1, alpha = .75, size = .25, height = 0) +
-  stat_summary(fun = mean, size = 0.05, colour = "red") +
-  stat_summary(aes(x = x, y = est),
-               fun = mean, size = 0.05, colour = "blue") +
-  labs(y = ylab) +
+  geom_jitter(width = .1, alpha = .75, size = 1.5, height = 0) +
+  #stat_summary(fun = mean, size = 0.05, colour = "red") +
+  #stat_summary(aes(x = x, y = est), fun = mean, size = 0.05, colour = "blue") +
   theme_mres() +
-  theme(plot.title = element_blank()) +
-  scale_y_continuous(sec.axis = dup_axis(),
-                     expand = c(0, 0), limits = c(y_min, y_max)) 
+  theme(plot.title = element_blank(),
+        axis.text.x=element_blank(), 
+        axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  geom_segment(aes(x=1, xend=1, y=60, yend=155), 
+                 arrow = arrow(length = unit(0.5, "cm")), colour = "blue", size = 2)  +
+  geom_segment(aes(x=2, xend=2, y=60, yend=155), 
+               arrow = arrow(length = unit(0.5, "cm")), colour = "blue",  size = 2) +
+  geom_segment(aes(x = 0.8, y = 193, xend = 3.2, yend = 193), colour = "coral2",  size = 2) +
+  geom_segment(aes(x=3, xend=3, y=160, yend=190), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "coral2",  size = 2) +
+  guides(color = FALSE,  
+         fill = guide_legend(order = 1))
+
 
 # fitted all with REML = FALSE
 # this changes values on performance spider diagram
@@ -739,3 +754,154 @@ plot_model(height_uniqueness,
            show.values = TRUE,
            value.offset = .4)
 plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
+
+
+# example plots for report
+gp1 <- rnorm(30, 70, 11)
+gp2 <- rnorm(30, 75, 7)
+gp3 <- rnorm(30, 60, 4)
+
+df1 <- as.data.frame(cbind(gp1, gp2, gp3))
+
+df1 <- df1 %>%
+  rename(`Mr. Smith` = gp1,
+         `Miss Robertson` = gp2,
+         `Mrs. Jenkins` = gp3)
+
+df1 <- df1 %>%
+  pivot_longer(names_to = "Teacher",
+               values_to = "Rating (%)",
+               cols = c(`Mr. Smith`,
+                        `Miss Robertson`,
+                        `Mrs. Jenkins`)) 
+
+p1 <- df1 %>%
+  ggplot(aes(x = Teacher,
+             y = `Rating (%)`)) +
+  geom_bar(stat = "summary", fun.y = "mean", width = .3) +
+  theme_minimal() +
+  coord_cartesian(ylim = c(40, 100)) +
+  theme_mres()
+
+set.seed(80)
+p2 <- df1 %>%
+  ggplot(aes(x = Teacher,
+             y = `Rating (%)`)) +
+  geom_jitter(width = 0.1) +
+  theme_minimal() +
+  coord_cartesian(ylim = c(40, 100)) +
+  theme_mres()
+
+p1 + p2 + plot_annotation(tag_levels = 'A') & 
+  theme(plot.tag = element_text(size = 18))
+
+anscombe_df <- anscombe %>%
+  as.data.frame() %>%
+  pivot_longer(names_to = "Teacher",
+               values_to = "Rating (%)",
+               cols = x1:y4)
+
+aq1 <- ggplot(anscombe, aes(x=x1, y=y1)) + 
+  geom_point(size= 2.5, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  coord_cartesian(ylim = c(3, 13)) 
+
+aq2 <- ggplot(anscombe, aes(x=x2, y=y2)) + 
+  geom_point(size= 2.5, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  coord_cartesian(ylim = c(3, 13)) 
+
+
+aq3 <- ggplot(anscombe, aes(x=x3, y=y3)) + 
+  geom_point(size= 2.5, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  coord_cartesian(ylim = c(3, 13)) 
+
+
+aq4 <- ggplot(anscombe, aes(x=x4, y=y4)) + 
+  geom_point(size= 2.5, alpha = 0.7) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  coord_cartesian(ylim = c(3, 13)) 
+
+
+
+aq1 + aq2 + aq3 + aq4
+
+c_shape_y <- c(12, 11.5, 12, 12.5, 13, 14, 15, 16, 16.5, 17, 17.5, 17)
+c_shape_x <- c(16, 15, 14, 13, 12, 12, 12, 12, 13, 14, 15, 16)
+c_shape <- cbind(c_shape_x, c_shape_y) %>%
+  as.data.frame()
+
+c_shape_mean <- c_shape %>% 
+  summarise(c_shape_y = mean(c_shape_y),
+            c_shape_x  = mean(c_shape_x))
+
+ex1 <- c_shape %>% ggplot(aes(x = c_shape_x,
+                              y = c_shape_y)) +
+  geom_point(size = 2) +
+  geom_point(data = c_shape_mean, size = 4, shape = 4, colour = "blue") +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  coord_cartesian(ylim = c(11, 18),
+                  xlim = c(10, 18)) +
+  geom_label(
+    label="Centroid", 
+    x=15.5,
+    y=14.5,
+    label.size = 0.01,
+    color = "black",
+  )
+ex1
+
+
+bi_dist <- c(1, 1, 1, 1, 1, 1, 1, 1,
+             2, 2, 2, 2, 2,
+             3, 3, 
+             9, 9,
+             10, 10, 10, 10, 10,  
+             11, 11, 11, 11, 11, 11, 11, 11)
+placeholder <- rnorm(length(bi_dist), 0, 1)
+df2 <- data.frame(cbind(bi_dist, placeholder))
+
+df2 <- df2 %>% gather(x_ax, y_ax) 
+
+ex2 <- df2 %>% filter(x_ax == "bi_dist") %>% 
+  ggplot(aes(x = x_ax,
+             y = y_ax)) +
+  geom_jitter(width = 0.03, alpha = 0.7) +
+  stat_summary(fun.y = "mean", shape = 4, 
+               colour = "blue", size = 1) +
+  theme_mres() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) +
+  geom_label(
+    label="Centroid", 
+    y = 6.2,
+    x = 1.25,
+    label.size = 0.1,
+    color = "black",
+  )
+
+ex1 + ex2 + plot_annotation(tag_levels = 'A') & 
+  theme(plot.tag = element_text(size = 18))
+
+
