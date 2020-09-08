@@ -18,3 +18,18 @@ This script has three main sections:
 - Model-building and visualisation
 - Supplementary visualisations for report
  
+## Data Files
+
+- `U_graphs_1_data.csv` contains participant response data and demographic information
+- The other data files contain information concerning the stimuli:
+     - `graphs_book1` in the `graph_generation` folder contains the population-level statistics used for sampling when building stimuli visualisations
+     - `all_summary` in the `summary_stats` folder (inside `graph_generation`) contains the sample-level means, SDs, min and max values created when building stimuli visualisations 
+     - `axis_summary` and `blank_axis_summary` in the `summary_stats` folder (inside `graph_generation`) contain the upper and lower y-axis limits used in stimuli visualisations (both populated graphs used during presentation, and also blank graphs used response)
+
+# Stimuli Generation
+
+- `graph_generator.R` in the `graph_generation` folder generates all graphs used for stimuli and responses. 
+     - This script uses population-level statistics from `graphs_book1.csv` as input for samples plotted in the graphs
+     - This script produces summary files in the `summary_stats` folder (inside `graph_generation`)
+- `graph_lists.R` produces .csv files for use in PsychoPy to control presentation of stimuli
+- `tutorial_and_prac_graphs.R` produces graphs used in the tutorial and practice phases of the experiment
