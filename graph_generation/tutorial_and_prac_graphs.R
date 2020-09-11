@@ -62,6 +62,7 @@ p <- set_panel_size(p,
                     height = unit(4, "cm"))
 p <- arrangeGrob(p)
 
+dir.create("tutorial_and_prac_graphs")
 ggsave(paste0("tutorial_and_prac_graphs/tut1.png"), p, width = 3.15, height = 1.8, dpi = 300)
 
 # The average amount of rainfall per day was just over 5 mm

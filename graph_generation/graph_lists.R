@@ -4,6 +4,8 @@ numbers <- c(1:9)
 numbers <- (numbers+9)
 numbers
 
+dir.create("lists")
+
 marathon <- as_tibble(paste0('graphs/graph', 1:9, '.png')) %>% 
   rename(graph_image = value) %>%
   cbind(paste0('graphs/graph', 1:9, 'b.png')) %>%
