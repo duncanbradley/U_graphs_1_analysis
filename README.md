@@ -33,3 +33,7 @@ This script has three main sections:
      - This script produces summary files in the `summary_stats` folder (inside `graph_generation`)
 - `graph_lists.R` produces .csv files for use in PsychoPy to control presentation of stimuli
 - `tutorial_and_prac_graphs.R` produces graphs used in the tutorial and practice phases of the experiment
+
+# Experiment Script
+
+- The file `U_graphs_1.psyexp` is the PsychoPy script which runs the experiment.
