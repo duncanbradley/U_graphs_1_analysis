@@ -1,11 +1,6 @@
 library(tidyverse)
 library(egg)
 
-# not sure if scale_y_continuous reports points excluded from plot
-# so run first without scale_y_continuous to get min and max values for each plot
-# to check that plotting is not changing the underlying data
-# then run with scale_y_continuous to set axis limits
-
 # options explored for setting y axis limits:
 # ylim(y_min, y_max) # same as scale_y_continuous
 # coord_cartesian(ylim = c(y_min, y_max)) # also expands x axis
