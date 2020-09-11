@@ -34,6 +34,6 @@ This script has three main sections:
 - `graph_lists.R` produces .csv files for use in PsychoPy to control presentation of stimuli
 - `tutorial_and_prac_graphs.R` produces graphs used in the tutorial and practice phases of the experiment
 
-## Experiment Script
+## Experimental Script
 
 - The file `U_graphs_1.psyexp` is the PsychoPy script which runs the experiment.
