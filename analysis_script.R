@@ -8,6 +8,7 @@ library(naniar)
 library(broom.mixed)
 library(interactions)
 library(patchwork)
+library(ggforce)
 
 # DATA WRANGLING ####
 
@@ -95,7 +96,7 @@ df <- df %>% dplyr::rename(
 # Adding data pertaining to the graphs: 
 
 # paste the name of the folder that contain the graph data
-path <- "U_graphs_1/summary_stats"
+path <- "graph_generation/summary_stats"
 
 # read the csvs
 stats_summary <- read_csv(file.path(path, pattern = "all_summary.csv"))
@@ -151,7 +152,7 @@ df <- df %>%
          )
 
 # reading in graphs_book1, which provides the statistics used to build the graphs
-graphs_book1 <- read_csv(file.path(pattern = "U_graphs_1/graphs_book1.csv"))
+graphs_book1 <- read_csv(file.path(pattern = "graph_generation/graphs_book1.csv"))
 
 # adding prefix and suffix to match graph_image in `df`
 graphs_book1$graph_image <- paste0("graphs/graph", graphs_book1$graph_id, ".png") 
@@ -202,20 +203,17 @@ df <- df %>%
 df <- df %>% 
   rowwise() %>%
   mutate(separation = case_when(unique_xpos == 1 ~ 
-                                 (slider_1.mean - 
+                                 ((slider_1.mean - 
                                      mean(slider_2.mean, slider_3.mean)
-                                  )/
-                                   (upper_lim - lower_lim),
+                                  )/(upper_lim - lower_lim)),
                                 unique_xpos == 2 ~ 
-                                  (slider_2.mean - 
+                                  ((slider_2.mean - 
                                      mean(slider_1.mean, slider_3.mean)
-                                  )/
-                                  (upper_lim - lower_lim),
+                                  )/(upper_lim - lower_lim)),
                                 unique_xpos == 3 ~ 
-                                  (slider_3.mean - 
+                                  ((slider_3.mean - 
                                      mean(slider_1.mean, slider_2.mean)
-                                  )/
-                                  (upper_lim - lower_lim)
+                                  )/(upper_lim - lower_lim))
   )
   ) %>%
   mutate(unique_ypos = case_when(separation > 0 ~ "above",
@@ -318,11 +316,13 @@ length(unique(participant_info$participant))
 mean(participant_info$time_taken)
 
 
-# ANALYSIS
-
 # coding 'is_unique' and 'unique_ypos' as factors
 df$is_unique <- as.factor(df$is_unique)
 df$unique_ypos <- as.factor(df$unique_ypos)
+# setting contrasts for these factors
+contrasts(df$is_unique) <- matrix(c(.5, -.5))
+contrasts(df$unique_ypos) <- matrix(c(.5, -.5))
+
 
 # checking the distribution of the DV (z_score)
 # Cullen and Frey plot:
@@ -345,24 +345,32 @@ abline(v=mean(df$z_score),col="blue")
 qts[1]
 qts[2]
 
-# t-test: the true mean is not equal to 0
-t.test(df$z_score)
-
 # visualising z_scores individually for each participant
 # participant 71 produced the unusually high estimates
 df %>% 
+  #filter(participant == 1) %>%
   ggplot(aes(x = participant,
              y = z_score)) +
-  geom_point(alpha = 0.1) +
-  stat_summary(fun = mean, size = 0.1, colour = "red")
+  geom_point(alpha = 0.2, size = 2) +
+  stat_summary(fun = mean, size = 0.5, colour = "coral") +
+  theme_minimal(base_size=18) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(y = "Estimation Error\n(in Cluster Standard Deviations)",
+       x = "Participant") +
+  geom_segment(aes(x = -1, xend = -1, y= 0, yend= 2),
+               arrow=arrow(length=unit(0.2,"cm")), colour = "darkgrey") +
+  geom_segment(aes(x = -1, xend = -1, y= 0, yend= -2),
+               arrow=arrow(length=unit(0.2,"cm")), colour = "darkgrey") +
+  geom_text(aes(x = -1, y= 5, angle = 90),
+            label = "Over-estimation", colour = "darkgrey", size = 4) +
+  geom_text(aes(x = -1, y= -5, angle = 90),
+            label = "Under-estimation", colour = "darkgrey", size = 4) +
+  coord_cartesian(xlim = c(-3, 82))
 
-# null model: no fixed effects
-null_model <- lmer(z_score ~ 
-                     (1 | participant) + 
-                     (1 | graph_image), 
-                   data = df)
 
-# MODEL 1:
+# MODEL 1 - VISUALISATIONS:
 # are unique or non-unique clusters more accurate?
 df %>%
   ggplot(aes(y = z_score,
@@ -370,17 +378,6 @@ df %>%
   geom_boxplot(outlier.shape = NA) +
   coord_cartesian(ylim = c(-1.8, 1.8))
 
-uniqueness <- lmer(z_score ~ is_unique +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
-
-tests <- tidy(uniqueness) %>% 
-  filter(effect == "fixed",
-         term != "(Intercept)") %>%
-  cbind(Model = rep("Model1"))
-
-# MODEL 2:
 # how does separation between unique and non-unique clusters affect accuracy?
 df %>%
   ggplot(aes(x = separation,
@@ -388,18 +385,6 @@ df %>%
   geom_point(alpha = 0.1) +
   geom_smooth(method = lm)
 
-separation <- lmer(z_score ~ separation +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
-
-tests <- tidy(separation) %>%
-  filter(effect == "fixed",
-         term != "(Intercept)") %>%
-  cbind(Model = rep("Model2")) %>%
-  rbind(tests) 
-
-# MODEL 3:
 # how does relative position of unique clusters affect accuracy?
 df %>%
   ggplot(aes(y = z_score,
@@ -407,18 +392,6 @@ df %>%
   geom_boxplot(outlier.shape = NA) +
   coord_cartesian(ylim = c(-1.8, 1.8))
 
-unique_ypos <- lmer(z_score ~ unique_ypos +
-                          (1 | participant) + 
-                          (1 | graph_image), 
-                        data = df)
-
-tests <- tidy(unique_ypos) %>%
-  filter(effect == "fixed",
-         term != "(Intercept)") %>%
-  cbind(Model = rep("Model3")) %>%
-  rbind(tests) 
-
-# MODEL 4:
 # Interaction between separation and uniqueness
 df %>% 
   ggplot(aes(x = separation,
@@ -426,94 +399,80 @@ df %>%
              colour = is_unique)) +
   geom_smooth(method = lm) 
 
-separation_uniqueness <- lmer(z_score ~ separation*is_unique +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
-
-tests <- tidy(separation_uniqueness) %>%
-  filter(effect == "fixed",
-         term != "(Intercept)") %>%
-  cbind(Model = rep("Model4")) %>%
-  rbind(tests) 
-
-# MODEL 5:
 # Interaction between relative position of unique clusters and uniqueness
 df %>%
-  mutate(relative_position = case_when(is_unique = TRUE |
-                                         unique_ypos = "above" ~ "above"))
-  ggplot(aes(x = is_unique,
+  ggplot(aes(x = unique_ypos,
              y = z_score,
-             colour = unique_ypos)) +
+             colour = is_unique)) +
   geom_boxplot(outlier.shape = NA) +
-  coord_cartesian(ylim = c(-1.8, 1.8)) +
-  theme_minimal(base_size=20, 
-                base_family="Helvetica") +
-  #labs(title = "Relationship Between Cluster Uniqueness\nand Relative Position",
-       #x = "Cluster Uniqueness",
-       #y = "Estimate (z-score)",
-       #colour = "Position Relative to Other Cluster(s)")  +
-  #scale_colour_discrete(labels = c('Above','Below')) +
-  #scale_x_discrete(labels = c('Duplicated','Unique')) +
-  theme(legend.position="right")
+  coord_cartesian(ylim = c(-1.7, 1.7)) +
+  theme_minimal(base_size=18) +
+  labs(x = "Position Of Unique Cluster (Relative to Other Clusters)",
+       y = "Estimation Error\n(in Cluster Standard Deviations)",
+       colour = "Cluster Uniqueness")  +
+  scale_x_discrete(labels = c('Above','Below')) +
+  theme(legend.position="right") +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2", labels = c('Duplicated','Unique')) +
+  geom_segment(aes(x = 0.5, xend = 0.5, y= 0, yend= 0.3),
+               arrow=arrow(length=unit(0.2,"cm")), colour = "darkgrey") +
+  geom_segment(aes(x = 0.5, xend = 0.5, y= 0, yend= -0.3),
+               arrow=arrow(length=unit(0.2,"cm")), colour = "darkgrey") +
+  geom_text(aes(x = 0.5, y= 1.1, angle = 90),
+               label = "Over-estimation", colour = "darkgrey", size = 5) +
+  geom_text(aes(x = 0.5, y= -1.1, angle = 90),
+            label = "Under-estimation", colour = "darkgrey", size = 5)
 
-
-
-unique_ypos_uniqueness <- lmer(z_score ~ unique_ypos*is_unique +
-                                 (1 | participant) + 
-                                 (1 | graph_image), 
-                               data = df)
-
-tests <- tidy(unique_ypos_uniqueness) %>%
-  filter(effect == "fixed",
-         term != "(Intercept)") %>%
-  cbind(Model = rep("Model5")) %>%
-  rbind(tests) 
-
-# MODEL 6:
 # Interaction between separation and relative position of unique clusters
 df %>% 
   ggplot(aes(x = separation,
              y = z_score,
              colour = unique_ypos)) +
-  #geom_point(alpha = 0.1, colour = "black") +
-  geom_smooth(method = lm) 
+  geom_point(alpha = 0.05, colour = "black") +
+  geom_smooth(method = lm, se = FALSE, size = 1.5) +
+  facet_zoom(ylim = c(0, 0.3)) +
+  labs(x = "Amount of Separation Between Unique and Non-Unique Clusters",
+       colour = "Position of Unique Cluster\n(Relative to Non-Unique Clusters)",
+       y = "Estimation Error\n(in Cluster Standard Deviations)") +
+  theme_grey(base_size = 18) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2", labels = c('Above','Below'))
 
-separation_unique_ypos <- lmer(z_score ~ separation*unique_ypos +
-                                     (1 | participant) + 
-                                     (1 | graph_image), 
-                                   data = df)
+# MODEL 1 - MODEL:
+model1 <- lmer(z_score ~
+                 is_unique +
+                 separation +
+                 unique_ypos +
+                 is_unique:separation +
+                 is_unique:unique_ypos +
+                 separation:unique_ypos + 
+               (1 | participant) + 
+               (1 | graph_image),
+             data = df)
+summary(model1)
+  
 
-summary(separation_unique_ypos)
-
-tests <- tidy(separation_unique_ypos) %>%
+table1 <- tidy(model1) %>%
   filter(effect == "fixed",
          term != "(Intercept)") %>%
-  cbind(Model = rep("Model6")) %>%
-  rbind(tests) %>%
+  cbind(Model = rep("Model1")) %>%
   arrange(Model) %>%
   select(Model, 
          term:p.value,
          - effect,
          - group)
 
-tests$estimate <- round(tests$estimate, 2)
-tests$std.error <- round(tests$std.error, 2)
-tests$statistic <- round(tests$statistic, 2)
-tests$df <- round(tests$df, 2)
-tests$p.value <- round(tests$p.value, 3)
+table1$estimate <- round(table1$estimate, 2)
+table1$std.error <- round(table1$std.error, 2)
+table1$statistic <- round(table1$statistic, 2)
+table1$df <- round(table1$df, 2)
+table1$p.value <- round(table1$p.value, 3)
 
-write_csv(tests, file.path("model1-6_summary"))
+write_csv(table1, file.path("model1_summary"))
 
-
-summary(separation_unique_ypos)
-ss <- sim_slopes(separation_unique_ypos, pred = separation, modx = unique_ypos)
-ss
-ss$slopes
-ss$ints
-plot(ss)
-
-# MODEL 7:
+# MODEL 2 - VISUALISATIONS:
 # Effect of height (vertical y axis position) on estimates
 df %>%
   ggplot(aes(x = height,
@@ -526,33 +485,55 @@ df %>%
              y = z_score)) +
   geom_smooth(method = lm )
 
-height <- lmer(z_score ~ height + 
+# MODEL 2 - MODEL:
+model2 <- lmer(z_score ~ height +
                  (1 | participant) + 
-                 (1 | graph_image), 
+                 (1 | graph_image),
                data = df)
+summary(model2)
 
-anova(height, null_model)
-summary(height)
+table2 <- tidy(model2) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(Model = rep("Model 2")) %>%
+  arrange(Model) %>%
+  select(Model, 
+         term:p.value,
+         - effect,
+         - group)
 
-# MODEL 8
+table2$estimate <- round(table2$estimate, 2)
+table2$std.error <- round(table2$std.error, 2)
+table2$statistic <- round(table2$statistic, 2)
+table2$df <- round(table2$df, 2)
+table2$p.value <- round(table2$p.value, 3)
+
+write_csv(table2, file.path("model2_summary"))
+
+# MODEL 3 - VISUALISATIONS:
 # Interaction between height and relative position of unique clusters
 df %>% 
   ggplot(aes(x = height,
              y = z_score,
              colour = unique_ypos)) +
-  geom_point(alpha = 0.1, colour = "black") +
+  #geom_point(alpha = 0.1, colour = "black") +
   geom_smooth(method = lm)
 
-height_unique_ypos <- lmer(z_score ~ height*unique_ypos +
-                 (1 | participant) + 
-                 (1 | graph_image), 
-               data = df)
+df %>%
+  ggplot(aes(x = height,
+             y = z_score,
+             colour = unique_ypos)) +
+  geom_point(alpha = 0.05, colour = "black") +
+  geom_smooth(method = lm, se = FALSE, size = 1.5) +
+  facet_zoom(ylim = c(0, 0.3)) +
+  labs(x = "Cluster Vertical Position",
+       colour = "Position of Unique Cluster\n(Relative to Non-Unique Clusters)",
+       y = "Estimation Error\n(in Cluster Standard Deviations)") +
+  theme_grey(base_size = 18) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2", labels = c('Above','Below'))
 
-anova(height_unique_ypos, null_model)
-summary(height_unique_ypos)
-
-
-# MODEL 9:
 # Interaction between height and magnitude of separation
 df %>% 
   ggplot(aes(x = height,
@@ -561,43 +542,51 @@ df %>%
   geom_point(alpha = 0.1, colour = "black") +
   geom_smooth(method = lm)
 
-height_separation <- lmer(z_score ~ height*separation +
-                                 (1 | participant) + 
-                                 (1 | graph_image), 
-                               data = df)
-anova(height_separation, null_model)
-summary(height_separation)
-
-# MODEL 10:
 # Interaction between height and uniqueness
 df %>%
   ggplot(aes(x = height,
              y = z_score,
              colour = is_unique)) +
-  geom_point(alpha = 0.1, colour = "black") +
-  geom_smooth(method = lm)
+  geom_point(alpha = 0.05, colour = "black") +
+  geom_smooth(method = lm, se = FALSE, size = 1.5) +
+  facet_zoom(ylim = c(0, 0.3)) +
+  labs(x = "Cluster Vertical Position",
+       colour = "Cluster Uniqueness",
+       y = "Estimation Error\n(in Cluster Standard Deviations)") +
+  theme_grey(base_size = 18) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank()) +
+  scale_color_brewer(palette="Dark2", labels = c('Duplicated','Unique'))
 
-height_uniqueness <- lmer(z_score ~ height*is_unique + 
+# MODEL 3 - MODEL:
+model3 <- lmer(z_score ~ 
+                 separation*height +
+                 unique_ypos*height +
+                 is_unique*height +
                  (1 | participant) + 
-                 (1 | graph_image), 
+                 (1 | graph_image),
                data = df)
+summary(model3)
 
-anova(height_uniqueness, null_model)
-summary(height_uniqueness)
+table3 <- tidy(model3) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(Model = rep("Model 3")) %>%
+  arrange(Model) %>%
+  select(Model, 
+         term:p.value,
+         - effect,
+         - group)
 
-df %>%
-  group_by(is_unique, unique_ypos) %>%
-  summarise(height = mean(height))
+table3$estimate <- round(table3$estimate, 2)
+table3$std.error <- round(table3$std.error, 2)
+table3$statistic <- round(table3$statistic, 2)
+table3$df <- round(table3$df, 2)
+table3$p.value <- round(table3$p.value, 3)
 
-# simple slopes analysis
-ss <- sim_slopes(height_uniqueness, pred = height, modx = is_unique)
+write_csv(table3, file.path("model3_summary"))
 
-ss
-ss$slopes
-ss$ints
-plot(ss)
-
-# MODEL 11:
+# MODEL 4 - VISUALISATION:
 # extension_difference
 df <- df %>%
   rowwise() %>%
@@ -607,63 +596,55 @@ df <- df %>%
 
 hist(df$extension_difference)
 
+
 df %>%
   ggplot(aes(x = extension_difference,
              y = z_score)) +
-  #geom_point(alpha = 0.1) +
-  geom_smooth(method = lm) +
-  theme_minimal()
+  geom_point(alpha = 0.05, colour = "black") +
+  geom_smooth(method = lm, se = FALSE, size = 1.5, colour = "orange1") +
+  facet_zoom(ylim = c(-0.15, 0.4)) +
+  labs(x = "Extension Difference",
+       y = "Estimation Error\n(in Cluster Standard Deviations)") +
+  theme_grey(base_size = 18) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor = element_blank())
 
-extension_difference <- lmer(z_score ~ extension_difference +
-              (1 | participant) +
-              (1 | graph_image),
-            df)
-summary(extension_difference)
+# MODEL 4 - MODEL:
+# previous significant interactions included in order to test whether extension difference
+# accounts for previous data
+model4 <- lmer(z_score ~ 
+               separation*unique_ypos +
+               height*unique_ypos + 
+               height*is_unique + 
+               extension_difference +
+               (1 | participant) + 
+               (1 | graph_image),
+             data = df)
+summary(model4)
 
-# MODEL 12:
-# adding extension_difference as a covariate 
-# to see whether it can explain away existing significant interaction
-# between separation and separation sign (MODEL 6)
+table4 <- tidy(model4) %>%
+  filter(effect == "fixed",
+         term != "(Intercept)") %>%
+  cbind(Model = rep("Model 4")) %>%
+  arrange(Model) %>%
+  select(Model, 
+         term:p.value,
+         - effect,
+         - group)
 
-separation_unique_ypos_ed <- lmer(z_score ~ separation*unique_ypos + extension_difference +
-                                 (1 | participant) + 
-                                 (1 | graph_image), 
-                               data = df)
-summary(separation_unique_ypos_ed)
-anova(separation_unique_ypos_ed, separation_unique_ypos)
+table4$estimate <- round(table4$estimate, 2)
+table4$std.error <- round(table4$std.error, 2)
+table4$statistic <- round(table4$statistic, 2)
+table4$df <- round(table4$df, 2)
+table4$p.value <- round(table4$p.value, 3)
 
-interact_plot(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
-sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
-ss <- sim_slopes(separation_unique_ypos_ed, pred = separation, modx = unique_ypos)
-ss
-ss$slopes
-ss$ints
-plot(ss)
-coef(separation_unique_ypos)
-
-# MODEL 13:
-# adding extension_difference as a covariate 
-# to see whether it can explain away existing significant interaction
-# between height and uniqueness (MODEL 6)
-
-height_uniqueness_ed <- lmer(z_score ~ height*is_unique + extension_difference +
-                                    (1 | participant) + 
-                                    (1 | graph_image), 
-                                  data = df)
-summary(height_uniqueness_ed)
-
-interact_plot(height_uniqueness, pred = height, modx = is_unique)
-sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
-ss <- sim_slopes(height_uniqueness_ed, pred = height, modx = is_unique)
-ss$slopes
-ss$ints
-plot(ss)
+write_csv(table4, file.path("model4_summary"))
 
 
 
+# SUPPLEMENTARY VISUALISATIONS ####
 
-
-
+# theme used for the stimuli visualisations
 theme_mres <- function() {
   theme_minimal(base_size=2.7, base_family="Helvetica") +
     theme(plot.title = element_text(hjust = 0.5, size = 25),
@@ -684,8 +665,8 @@ theme_mres <- function() {
     )
 }
 
+# example 1: proposed mechanism
 index <- 36
-53
 # the following function takes the parameters of a dataset and uses them to 
 # build a dataframe. 
 create_df <- function(my_df){
@@ -719,7 +700,7 @@ build_this_one <- build_this_one %>%
          val = (est - mean)/sd(y))
 
 set.seed(1234 +index)
-build_this_one %>% 
+eg1 <- build_this_one %>% 
   ggplot(aes(x = x, y = y)) +
   geom_jitter(width = .1, alpha = .75, size = 1.5, height = 0) +
   #stat_summary(fun = mean, size = 0.05, colour = "red") +
@@ -730,33 +711,184 @@ build_this_one %>%
         axis.text.y=element_blank(),
         axis.title.y=element_blank(),
         axis.ticks.y=element_blank()) +
-  geom_segment(aes(x=1, xend=1, y=60, yend=155), 
-                 arrow = arrow(length = unit(0.5, "cm")), colour = "blue", size = 2)  +
-  geom_segment(aes(x=2, xend=2, y=60, yend=155), 
-               arrow = arrow(length = unit(0.5, "cm")), colour = "blue",  size = 2) +
-  geom_segment(aes(x = 0.8, y = 193, xend = 3.2, yend = 193), colour = "coral2",  size = 2) +
+  scale_y_continuous(sec.axis = dup_axis(),
+                     expand = c(0, 0), limits = c(60, 260)) +
+  geom_segment(aes(x=1, xend=1, y=70, yend=155), 
+                 arrow = arrow(length = unit(0.5, "cm")), colour = "blue", size = 1)  +
+  geom_segment(aes(x=2, xend=2, y=70, yend=155), 
+               arrow = arrow(length = unit(0.5, "cm")), colour = "blue",  size = 1) +
+  geom_segment(aes(x = 0.8, y = 193, xend = 3.2, yend = 193), colour = "coral2",  size = 1) +
   geom_segment(aes(x=3, xend=3, y=160, yend=190), 
                arrow = arrow(length = unit(0.5, "cm")),
-               colour = "coral2",  size = 2) +
+               colour = "coral2",  size = 1) +
   guides(color = FALSE,  
-         fill = guide_legend(order = 1))
+         fill = guide_legend(order = 1)) +
+  geom_text(aes(x = 1.5, y= 90),
+            label = "Over-compensation \nfor blank space", 
+            colour = "blue", size = 3) +
+  geom_text(aes(x = 3, y= 215),
+            label = "Landmark effect\n(attraction/perceptual pull)", 
+            colour = "coral2", size = 3)
 
+# example 2: proposed mechanism
+index <- 19
+# the following function takes the parameters of a dataset and uses them to 
+# build a dataframe. 
+create_df <- function(my_df){
+  set.seed(1234 + index)
+  y <- c(rnorm(24, my_df$gp1_pop_mean, my_df$gp1_pop_sd), 
+         rnorm(24, my_df$gp2_pop_mean, my_df$gp2_pop_sd),
+         rnorm(24, my_df$gp3_pop_mean, my_df$gp3_pop_sd))
+  x <- c(rep(my_df$gp1_label, 24), rep(my_df$gp2_label, 24),
+         rep(my_df$gp3_label, 24))
+  df <- as_tibble(cbind(y, x)) %>%
+    mutate(y = as.double(y)) %>%
+    mutate(x = as.factor(x))
+}
 
-# fitted all with REML = FALSE
-# this changes values on performance spider diagram
-# work out what is happening here
-check_model(model8)
-model_performance(height_uniqueness)
-plot(compare_performance(separation_unique_ypos, 
-                         height_uniqueness))
-model_parameters(height_uniqueness)
-plot_model(height_uniqueness,
-           show.values = TRUE,
-           value.offset = .4)
-plot_model(model7, type = "pred", terms = c("height", "is_ooo"))
+my_graphs <- graphs_book1
 
+build_this_one <- my_graphs %>%
+  filter(graph_id == index) %>%
+  create_df() 
 
-# example plots for report
+ylab <- my_graphs[my_graphs$graph_id == index,]$y_label
+y_min <- my_graphs[my_graphs$graph_id == index,]$y_min
+y_max <- my_graphs[my_graphs$graph_id == index,]$y_max
+
+avg_est <- mean(df$z_score)
+
+build_this_one <- build_this_one %>%
+  group_by(x) %>%
+  mutate(est = mean(y) + (sd(y)*avg_est),
+         mean = mean(y),
+         val = (est - mean)/sd(y))
+
+set.seed(1234 +index)
+eg2 <- build_this_one %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_jitter(width = .1, alpha = .75, size = 1.5, height = 0) +
+  theme_mres() +
+  theme(plot.title = element_blank(),
+        axis.text.x=element_blank(), 
+        axis.text.y=element_blank(),
+        axis.title.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  scale_y_continuous(sec.axis = dup_axis(),
+                     expand = c(0, 0), limits = c(3500, 6000)) +
+  geom_segment(aes(x=2, xend=2, y=3500, yend=3700), 
+               arrow = arrow(length = unit(0.3, "cm")), colour = "blue", size = 1)  +
+  geom_segment(aes(x=3, xend=3, y=3500, yend=3700), 
+               arrow = arrow(length = unit(0.3, "cm")), colour = "blue",  size = 1) +
+  geom_segment(aes(x = 0.8, y = 4368, xend = 3.2, yend = 4368), colour = "coral2",  size = 1) +
+  geom_segment(aes(x=1, xend=1, y=4800, yend=4400), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "coral2",  size = 1) +
+  guides(color = FALSE,  
+         fill = guide_legend(order = 1)) +
+  geom_text(aes(x = 1, y= 4000),
+            label = "Landmark effect\n(attraction/perceptual pull)", 
+            colour = "coral2", size = 3)
+
+eg1 + eg2 + plot_annotation(tag_levels = 'A') & 
+  theme(plot.tag = element_text(size = 18))
+
+# Visualising Extension Difference in Individual Clusters
+# negative extension difference
+index <- 45
+build_this_one <- my_graphs %>%
+  filter(graph_id == index) %>%
+  create_df() 
+
+ylab <- my_graphs[my_graphs$graph_id == index,]$y_label
+y_min <- my_graphs[my_graphs$graph_id == index,]$y_min
+y_max <- my_graphs[my_graphs$graph_id == index,]$y_max
+
+avg_est <- mean(df$z_score)
+
+build_this_one <- build_this_one %>%
+  group_by(x) %>%
+  mutate(est = mean(y) + (sd(y)*avg_est),
+         mean = mean(y),
+         val = (est - mean)/sd(y))
+set.seed(1234 +index)
+build_this_one %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_jitter(width = .05, alpha = .75, size = 1.5, height = 0) +
+  stat_summary(fun = mean, size = 0.6, colour = "darkgreen") +
+  theme_mres() +
+  coord_cartesian(ylim = c(45,80),
+                  xlim = c(1,1)) +
+  geom_segment(aes(x=1.07, xend=1.07, y=59.5, yend=49), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "coral2",  size = 1)  +
+  geom_segment(aes(x=1.07, xend=1.07, y=59.5, yend=66.5), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "royalblue3",  size = 1) +
+  geom_text(aes(x = 1, y= 47),
+            label = "Extension Difference = -0.06", 
+            colour = "black", size = 4) +
+  geom_segment(aes(x = 1, xend = 1.12, y = 59.5, yend = 59.5),
+               colour = "darkgreen") +
+  geom_text(aes(x = 1.16, y= 59.5),
+            label = "mean", 
+            colour = "darkgreen", size = 3) +
+  geom_text(aes(x = 1.21, y= 54),
+            label = "Larger extension\nbelow centroid", 
+            colour = "coral2", size = 4) +
+  geom_text(aes(x = 1.21, y= 62.5),
+            label = "Smaller extension\nabove centroid", 
+            colour = "royalblue3", size = 4) +
+  theme_void()
+
+# positive extension difference
+index <- 38
+build_this_one <- my_graphs %>%
+  filter(graph_id == index) %>%
+  create_df() 
+
+ylab <- my_graphs[my_graphs$graph_id == index,]$y_label
+y_min <- my_graphs[my_graphs$graph_id == index,]$y_min
+y_max <- my_graphs[my_graphs$graph_id == index,]$y_max
+
+avg_est <- mean(df$z_score)
+
+build_this_one <- build_this_one %>%
+  group_by(x) %>%
+  mutate(est = mean(y) + (sd(y)*avg_est),
+         mean = mean(y),
+         val = (est - mean)/sd(y))
+set.seed(1234 +index)
+build_this_one %>% 
+  ggplot(aes(x = x, y = y)) +
+  geom_jitter(width = .05, alpha = .75, size = 1.5, height = 0) +
+  stat_summary(fun = mean, size = 0.6, colour = "darkgreen") +
+  theme_mres() +
+  coord_cartesian(ylim = c(60,95),
+                  xlim = c(3,3)) +
+  geom_segment(aes(x=3.07, xend=3.07, y=82.35, yend=77), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "coral2",  size = 1)  +
+  geom_segment(aes(x=3.07, xend=3.07, y=82.35, yend=92.5), 
+               arrow = arrow(length = unit(0.5, "cm")),
+               colour = "royalblue3",  size = 1) +
+  geom_text(aes(x = 3, y= 75),
+            label = "Extension Difference = 0.09", 
+            colour = "black", size = 4) +
+  geom_segment(aes(x = 3, xend = 3.12, y = 82.35, yend = 82.35),
+               colour = "darkgreen") +
+  geom_text(aes(x = 3.16, y= 82.4),
+            label = "mean", 
+            colour = "darkgreen", size = 3) +
+  geom_text(aes(x = 3.21, y= 80),
+            label = "Smaller extension\nbelow centroid", 
+            colour = "coral2", size = 4) +
+  geom_text(aes(x = 3.21, y= 87),
+            label = "Larger extension\nabove centroid", 
+            colour = "royalblue3", size = 4) +
+  theme_void()
+
+# bar graph vs. univariate scatterplot
 gp1 <- rnorm(30, 70, 11)
 gp2 <- rnorm(30, 75, 7)
 gp3 <- rnorm(30, 60, 4)
@@ -781,20 +913,23 @@ p1 <- df1 %>%
   geom_bar(stat = "summary", fun.y = "mean", width = .3) +
   theme_minimal() +
   coord_cartesian(ylim = c(40, 100)) +
+  theme_minimal(base_size = 18) +
   theme_mres()
 
 set.seed(80)
 p2 <- df1 %>%
   ggplot(aes(x = Teacher,
              y = `Rating (%)`)) +
-  geom_jitter(width = 0.1) +
+  geom_jitter(width = 0.1, alpha = 0.1) +
   theme_minimal() +
   coord_cartesian(ylim = c(40, 100)) +
-  theme_mres()
+  theme_minimal(base_size = 18) +
+  theme_mres(base_size = 20)
 
 p1 + p2 + plot_annotation(tag_levels = 'A') & 
   theme(plot.tag = element_text(size = 18))
 
+# anscombe's quartet
 anscombe_df <- anscombe %>%
   as.data.frame() %>%
   pivot_longer(names_to = "Teacher",
@@ -839,10 +974,9 @@ aq4 <- ggplot(anscombe, aes(x=x4, y=y4)) +
         axis.title.y = element_blank()) +
   coord_cartesian(ylim = c(3, 13)) 
 
-
-
 aq1 + aq2 + aq3 + aq4
 
+# potential issues with centroids
 c_shape_y <- c(12, 11.5, 12, 12.5, 13, 14, 15, 16, 16.5, 17, 17.5, 17)
 c_shape_x <- c(16, 15, 14, 13, 12, 12, 12, 12, 13, 14, 15, 16)
 c_shape <- cbind(c_shape_x, c_shape_y) %>%
