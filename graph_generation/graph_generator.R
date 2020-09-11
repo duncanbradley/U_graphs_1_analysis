@@ -1,6 +1,8 @@
 library(tidyverse)
 library(egg)
 
+create.dir("graphs")
+
 # options explored for setting y axis limits:
 # ylim(y_min, y_max) # same as scale_y_continuous
 # coord_cartesian(ylim = c(y_min, y_max)) # also expands x axis
